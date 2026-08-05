@@ -544,7 +544,8 @@ impl ArchiveReader {
             std::os::unix::fs::symlink(target, out_dir).map_err(|_| CryoErrors::WriteError)?;
             return Ok(());
         }
-        let mut writer = File::create(&out_dir).map_err(|_| CryoErrors::WriteError)?;
+        let file = File::create(&out_dir).map_err(|_| CryoErrors::WriteError)?;
+        let mut writer = BufWriter::with_capacity(self.header.block_size as usize, file);
         let system_time = UNIX_EPOCH + Duration::from_secs(f.timestamp);
         let first = blocks.partition_point(|(_, end)| *end <= file_start);
 
@@ -612,6 +613,8 @@ impl ArchiveReader {
         }
 
         writer
+            .into_inner()
+            .map_err(|_| CryoErrors::WriteError)?
             .set_modified(system_time)
             .map_err(|_| CryoErrors::WriteError)?;
         Ok(())

@@ -6,7 +6,7 @@ use crate::{
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::{
     fs::{self, File, read_dir},
-    io::{BufReader, Read},
+    io::Read,
     os::unix::fs::MetadataExt,
 };
 use tracing::{Level, event};
@@ -191,15 +191,15 @@ pub fn read_file_to_bytes(
             };
             arch.index.files.push(entry);
 
-            let file = File::open(p).map_err(|e| CryoErrors::ReadFailed {
+            let mut file = File::open(p).map_err(|e| CryoErrors::ReadFailed {
                 p: p.to_path_buf(),
                 source: e,
             })?;
 
-            let mut reader = BufReader::new(file);
-            let mut chunk = [0u8; 8192];
+            let chunk_size = arch.header.block_size as usize;
+            let mut chunk = vec![0u8; chunk_size];
             loop {
-                let n = reader
+                let n = file
                     .read(&mut chunk)
                     .map_err(|e| CryoErrors::ReadFailed {
                         p: p.to_path_buf(),
