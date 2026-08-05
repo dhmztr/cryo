@@ -2,7 +2,13 @@
 
 Block-based archive tool with zstd compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption.
 
-## Build
+## Install
+
+```sh
+cargo install cryoarc
+```
+
+## Build from source
 
 ```sh
 cargo build --release
