@@ -1,9 +1,7 @@
----
+# cryo
 
-/ **_/ _**/ / / / ** \
-/ /**/ / / /_/ / /_/ /
-\_**/\_/ \_\_, /\_\_**/
-/\_\_\_\_/
+[![CI](https://github.com/dhmztr/cryo/actions/workflows/ci.yml/badge.svg)](https://github.com/dhmztr/cryo/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/cryoarc.svg)](https://crates.io/crates/cryoarc)
 
 Block-based archive tool with zstd compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption.
 
@@ -29,14 +27,14 @@ Binary lands at `target/release/cryo`.
 cryo compress <name> [options]
 ```
 
-| Flag                           | Default    | Description                                    |
-| ------------------------------ | ---------- | ---------------------------------------------- |
-| `-P, --path <PATH>`            | `./`       | Source path                                    |
-| `-r, --recursive`              | false      | Recurse into subdirectories                    |
-| `-c, --compression-level <N>`  | `3`        | zstd level (-7 to 22)                          |
-| `-e, --encryption-type <TYPE>` | `none`     | `aes`, `chacha`, or `none`                     |
-| `--ep <PROFILE>`               | `balanced` | Argon2 profile: `fast`, `balanced`, `paranoid` |
-| `--bs <SIZE>`                  | `64KiB`    | Block size (e.g. `1MiB`, `256KiB`)             |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-P, --path <PATH>` | `./` | Source path |
+| `-r, --recursive` | false | Recurse into subdirectories |
+| `-c, --compression-level <N>` | `3` | zstd level (-7 to 22) |
+| `-e, --encryption-type <TYPE>` | `none` | `aes`, `chacha`, or `none` |
+| `--ep <PROFILE>` | `balanced` | Argon2 profile: `fast`, `balanced`, `paranoid` |
+| `--bs <SIZE>` | `64KiB` | Block size (e.g. `1MiB`, `256KiB`) |
 
 ```sh
 cryo compress backup -P ./docs -r -c 9 -e aes
@@ -48,9 +46,9 @@ cryo compress backup -P ./docs -r -c 9 -e aes
 cryo decompress <archive.cryo> [options]
 ```
 
-| Flag                 | Default | Description                             |
-| -------------------- | ------- | --------------------------------------- |
-| `-o, --output <DIR>` | `./`    | Output directory (must be empty or new) |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-o, --output <DIR>` | `./` | Output directory (must be empty or new) |
 
 ```sh
 cryo decompress backup.cryo -o ./restored
@@ -107,13 +105,13 @@ Files spanning multiple blocks are reassembled by slicing the relevant byte rang
 
 All limits have conservative defaults and can be raised per-decompression:
 
-| Flag                | Default               |
-| ------------------- | --------------------- |
-| `--max-file-size`   | 10 GiB                |
-| `--max-block-size`  | 256 MiB               |
-| `--max-m-cost`      | 1 GiB (Argon2 memory) |
-| `--max-index-size`  | 100 MiB               |
-| `--max-header-size` | 64 KiB                |
+| Flag | Default |
+|------|---------|
+| `--max-file-size` | 10 GiB |
+| `--max-block-size` | 256 MiB |
+| `--max-m-cost` | 1 GiB (Argon2 memory) |
+| `--max-index-size` | 100 MiB |
+| `--max-header-size` | 64 KiB |
 
 These exist to protect against malformed or malicious archives that claim enormous sizes before any data is read.
 
