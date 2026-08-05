@@ -117,8 +117,8 @@ fn main() {
         std::process::exit(1);
     }
 }
-fn parse_size(size: &str) -> Result<Option<u64>, String> {
+fn parse_size(size: &str) -> Result<u64, String> {
     bytesize::ByteSize::from_str(size)
-        .map(|b| Some(b.as_u64()))
+        .map(|b| b.as_u64())
         .map_err(|e| format!("Invalid size: {e}"))
 }
