@@ -1,4 +1,10 @@
-# cryo
+```
+  ____________  ______ 
+ / ___/ ___/ / / / __ \
+/ /__/ /  / /_/ / /_/ /
+\___/_/   \__, /\____/ 
+         /____/
+```
 
 [![CI](https://github.com/dhmztr/cryo/actions/workflows/ci.yml/badge.svg)](https://github.com/dhmztr/cryo/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/cryoarc.svg)](https://crates.io/crates/cryoarc)
