@@ -343,7 +343,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cryo"
+name = "cryoarc"
 version = "0.1.0"
 dependencies = [
  "aes",
