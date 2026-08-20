@@ -1,12 +1,19 @@
 [package]
 name = "cryoarc"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Block-based archive tool with zstd compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption"
 license = "Apache-2.0"
 repository = "https://github.com/dhmztr/cryo"
 keywords = ["archive", "compression", "encryption", "zstd"]
 categories = ["command-line-utilities", "compression", "cryptography"]
+include = [
+    "src/**",
+    "tests/**",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+]
 
 [[bin]]
 name = "cryo"
