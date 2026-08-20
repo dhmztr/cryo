@@ -343,7 +343,6 @@ fn large_file_spanning_multiple_blocks() {
     let archive = tmp.join("large.cryo");
 
     fs::create_dir_all(&src).unwrap();
-    // 200 KiB of data with default 64 KiB block size -> at least 3 blocks
     let data: Vec<u8> = (0u8..=255).cycle().take(200 * 1024).collect();
     fs::write(src.join("big.bin"), &data).unwrap();
 
@@ -354,6 +353,8 @@ fn large_file_spanning_multiple_blocks() {
             "-P",
             src.to_str().unwrap(),
             "-r",
+            "--bs",
+            "64KiB",
         ])
         .status()
         .unwrap();

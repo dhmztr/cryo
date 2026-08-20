@@ -23,6 +23,7 @@ pub enum CryoErrors {
     HeaderTooLarge { size: u64, limit: u64 },
     ChecksumMismatch,
     InvalidPattern,
+    ThreadError,
 }
 
 impl Display for CryoErrors {
@@ -87,6 +88,10 @@ impl Display for CryoErrors {
             ),
             Self::ChecksumMismatch => write!(f, "Error checksum mismatched while veryfing!"),
             Self::InvalidPattern => write!(f, "You have provided invalid pattern for the files!"),
+            Self::ThreadError => write!(
+                f,
+                "While using multithreading to process archive error has happened!"
+            ),
         }
     }
 }

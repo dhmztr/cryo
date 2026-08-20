@@ -4,10 +4,11 @@ use std::path::PathBuf;
 
 use bytesize::ByteSize;
 
+use crate::cli::{ListArgs, OutputFormat};
 use crate::consts::Limits;
-use crate::decompress::FileStructs;
-use crate::structs::{EncryptionType, FileType};
-use crate::{ListArgs, OutputFormat, errors::CryoErrors};
+use crate::errors::CryoErrors;
+use crate::format::{EncryptionType, FileType};
+use crate::loader::FileStructs;
 
 pub fn list_files(args: ListArgs) -> Result<(), CryoErrors> {
     check_read_only_args_for_errors(&args.archive)?;

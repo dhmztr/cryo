@@ -9,7 +9,7 @@
 [![CI](https://github.com/dhmztr/cryo/actions/workflows/ci.yml/badge.svg)](https://github.com/dhmztr/cryo/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/cryoarc.svg)](https://crates.io/crates/cryoarc)
 
-Block-based archive tool with zstd compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption.
+Block-based archive tool with zstd compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption. Compression is parallelized across a worker pool: one thread reads and chunks the input, a pool of workers compresses/encrypts blocks concurrently, and a single writer thread persists them in order.
 
 ## Install
 
@@ -40,7 +40,7 @@ cryo compress <name> [options]
 | `-c, --compression-level <N>` | `3` | zstd level (-7 to 22) |
 | `-e, --encryption-type <TYPE>` | `none` | `aes`, `chacha`, or `none` |
 | `--ep <PROFILE>` | `balanced` | Argon2 profile: `fast`, `balanced`, `paranoid` |
-| `--bs <SIZE>` | `64KiB` | Block size (e.g. `1MiB`, `256KiB`) |
+| `--bs <SIZE>` | `512KiB` | Block size (e.g. `1MiB`, `256KiB`) |
 
 ```sh
 cryo compress backup -P ./docs -r -c 9 -e aes
@@ -120,6 +120,21 @@ All limits have conservative defaults and can be raised per-decompression:
 | `--max-header-size` | 64 KiB |
 
 These exist to protect against malformed or malicious archives that claim enormous sizes before any data is read.
+
+## Benchmarks
+
+`scripts/bench.sh` generates a ~970 MiB compressible corpus and times `cryo compress` (default level, 512 KiB blocks) against `tar | gzip` and `tar | zstd` at their default settings. Run it yourself with `./scripts/bench.sh` (needs `tar`, `gzip`, `zstd` on `PATH`).
+
+Measured on a 16-core machine, average of 3 runs:
+
+| | Time | Output size |
+|---|---|---|
+| cryo (sequential, pre-parallel) | 0.76s | 23 MiB |
+| **cryo (parallel worker pool)** | **0.28s** | 23 MiB |
+| `tar` + `gzip -6` | 2.26s | 49 MiB |
+| `tar` + `zstd` (default) | 0.45s | 21 MiB |
+
+Parallelizing compression gives ~2.7x speedup over the sequential implementation with identical output size (block layout and compression level are unchanged, only how blocks get produced). `gzip` is both slower and produces a larger archive than either. `tar`+`zstd` streams the whole archive through one zstd context so it can find long-range matches across block/file boundaries that cryo's fixed-size block chunking can't see, which is why its ratio edges out cryo's on highly repetitive data; cryo's parallel path is still faster in wall-clock time on multi-core machines.
 
 ## Encryption
 
