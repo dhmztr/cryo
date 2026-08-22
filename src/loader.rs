@@ -10,6 +10,7 @@ pub(crate) struct FileStructs {
     pub(crate) header: Header,
     pub(crate) index: Index,
     pub(crate) cipher: Cipher,
+    pub(crate) footer: Footer,
 }
 
 impl FileStructs {
@@ -125,6 +126,7 @@ impl FileStructs {
             header,
             index,
             cipher,
+            footer,
         })
     }
 }

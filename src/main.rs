@@ -1,4 +1,6 @@
+use crate::append::append_file;
 use crate::cli::Cli;
+
 use crate::compress::initialize_compression;
 use crate::decompress::initialize_decompression;
 use crate::list::list_files;
@@ -6,6 +8,7 @@ use crate::verify::verify_archive;
 use clap::Parser;
 use std::error::Error;
 use tracing::Level;
+mod append;
 mod cli;
 mod codec;
 mod compress;
@@ -37,6 +40,7 @@ fn main() {
         cli::Command::Decompress(args) => initialize_decompression(args),
         cli::Command::List(args) => list_files(args),
         cli::Command::Verify(args) => verify_archive(args),
+        cli::Command::Append(args) => append_file(args),
     };
     if let Err(e) = result {
         eprintln!("\x1b[1;31merror:\x1b[0m {e}");

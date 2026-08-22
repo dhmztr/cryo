@@ -19,6 +19,7 @@ pub(crate) enum Command {
     Decompress(DecompressArgs),
     List(ListArgs),
     Verify(VerifyArgs),
+    Append(AppendArgs),
 }
 
 #[derive(Args)]
@@ -58,6 +59,13 @@ pub(crate) struct DecompressArgs {
     #[arg(long,value_parser = parse_size)]
     pub(crate) max_header_size: Option<u64>,
     pub(crate) filter: Vec<String>,
+}
+#[derive(Args)]
+pub(crate) struct AppendArgs {
+    #[arg(short, long = "archive")]
+    pub(crate) archive_path: PathBuf,
+    #[arg(short, long = "append")]
+    pub(crate) file_to_append: PathBuf,
 }
 
 #[derive(Args)]

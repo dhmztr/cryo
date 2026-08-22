@@ -131,13 +131,13 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
         read_file_to_bytes(
             file.as_path(),
             &path,
-            pb_bytes.as_ref(),
             &mut files,
             &mut stream_position,
             &mut block_id,
             &mut pending_buffer,
             block_size,
             &raw_tx,
+            false,
         )?;
 
         if let Some(pb) = pb_bytes {
@@ -168,13 +168,13 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
 pub fn read_file_to_bytes(
     p: &Path,
     root: &Path,
-    pb: Option<&ProgressBar>,
     files: &mut Vec<FileEntry>,
     stream_position: &mut u64,
     block_id: &mut u64,
     pending_buffer: &mut Vec<u8>,
     block_size: usize,
     raw_tx: &Sender<RawBlock>,
+    appended: bool,
 ) -> Result<(), CryoErrors> {
     let fmetadata = fs::symlink_metadata(p).map_err(|e| CryoErrors::ReadFailed {
         p: p.to_path_buf(),
@@ -187,16 +187,22 @@ pub fn read_file_to_bytes(
     } else {
         FileType::File
     };
+    let stripped = if appended {
+        let last = p.file_name().ok_or(CryoErrors::InvalidPath)?;
+        last.to_str().ok_or(CryoErrors::InvalidPath)?;
+        PathBuf::from(last)
+    } else {
+        p.strip_prefix(&root)
+            .map_err(|_| CryoErrors::InvalidPath)?
+            .to_path_buf()
+    };
 
     event!(Level::DEBUG, path = %p.display(), ftype = ?ftype, size = fmetadata.size(), "reading entry");
     if !matches!(ftype, FileType::File) {
         return handle_non_regular_files(files, ftype, fmetadata, root, *stream_position, p);
     }
     let entry = FileEntry {
-        path: p
-            .strip_prefix(&root)
-            .map_err(|_| CryoErrors::InvalidPath)?
-            .to_path_buf(),
+        path: stripped,
         ftype,
         stream_offset: *stream_position,
         size: fmetadata.size(),
@@ -220,9 +226,6 @@ pub fn read_file_to_bytes(
         })?;
         if n == 0 {
             break;
-        }
-        if let Some(pb) = pb {
-            pb.inc(n as u64);
         }
         pending_buffer.extend_from_slice(&chunk[..n]);
         *stream_position += n as u64;
@@ -343,7 +346,7 @@ fn handle_non_regular_files(
 
 pub fn writer(rx: Receiver<WriterMessage>, arch: &mut ArchiveWriter) -> Result<(), CryoErrors> {
     let mut block_queue: BTreeMap<u64, ProcessedBlock> = BTreeMap::new();
-    let mut expected_id: u64 = 0;
+    let mut expected_id: u64 = arch.index.block.len() as u64;
     while let Ok(data) = rx.recv() {
         match data {
             WriterMessage::Block(block) => {
@@ -378,7 +381,7 @@ pub fn writer(rx: Receiver<WriterMessage>, arch: &mut ArchiveWriter) -> Result<(
     }
     Ok(())
 }
-fn spawn_workers(
+pub fn spawn_workers(
     raw_rx: Receiver<RawBlock>,
     writer_tx: Sender<WriterMessage>,
     cipher: Cipher,
