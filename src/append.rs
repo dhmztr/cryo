@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     cli::AppendArgs,
-    compress::{read_file_to_bytes, spawn_workers, writer},
+    compress::{read_file_to_bytes, retrieve_all_files, spawn_workers, writer},
     consts::Limits,
     errors::CryoErrors,
     format::Index,
@@ -71,17 +71,34 @@ pub fn append_file(args: AppendArgs) -> Result<(), CryoErrors> {
     };
 
     let writer_handle = thread::spawn(move || writer(reader_writer_rx, &mut archive));
-    read_file_to_bytes(
-        &file_to_append_path,
-        &arch_path,
-        &mut files,
-        &mut stream_pos,
-        &mut first_block_len,
-        &mut pending_buffer,
-        block_size,
-        &raw_tx,
-        true,
-    )?;
+    if file_to_append_path.is_dir() {
+        let root = &file_to_append_path;
+        let mut file_paths: Vec<PathBuf> = vec![];
+        retrieve_all_files(root.as_path(), &mut file_paths)?;
+        for path in file_paths {
+            read_file_to_bytes(
+                &path,
+                root,
+                &mut files,
+                &mut stream_pos,
+                &mut first_block_len,
+                &mut pending_buffer,
+                block_size,
+                &raw_tx,
+            )?;
+        }
+    } else {
+        read_file_to_bytes(
+            &file_to_append_path,
+            &arch_path,
+            &mut files,
+            &mut stream_pos,
+            &mut first_block_len,
+            &mut pending_buffer,
+            block_size,
+            &raw_tx,
+        )?;
+    }
 
     if !pending_buffer.is_empty() {
         let _ = raw_tx.send(RawBlock {

@@ -137,7 +137,6 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
             &mut pending_buffer,
             block_size,
             &raw_tx,
-            false,
         )?;
 
         if let Some(pb) = pb_bytes {
@@ -174,7 +173,6 @@ pub fn read_file_to_bytes(
     pending_buffer: &mut Vec<u8>,
     block_size: usize,
     raw_tx: &Sender<RawBlock>,
-    appended: bool,
 ) -> Result<(), CryoErrors> {
     let fmetadata = fs::symlink_metadata(p).map_err(|e| CryoErrors::ReadFailed {
         p: p.to_path_buf(),
@@ -187,15 +185,10 @@ pub fn read_file_to_bytes(
     } else {
         FileType::File
     };
-    let stripped = if appended {
-        let last = p.file_name().ok_or(CryoErrors::InvalidPath)?;
-        last.to_str().ok_or(CryoErrors::InvalidPath)?;
-        PathBuf::from(last)
-    } else {
-        p.strip_prefix(&root)
-            .map_err(|_| CryoErrors::InvalidPath)?
-            .to_path_buf()
-    };
+    let stripped = p
+        .strip_prefix(&root)
+        .map_err(|_| CryoErrors::InvalidPath)?
+        .to_path_buf();
 
     event!(Level::DEBUG, path = %p.display(), ftype = ?ftype, size = fmetadata.size(), "reading entry");
     if !matches!(ftype, FileType::File) {
@@ -241,7 +234,7 @@ pub fn read_file_to_bytes(
     Ok(())
 }
 
-fn retrieve_all_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), CryoErrors> {
+pub fn retrieve_all_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), CryoErrors> {
     event!(Level::DEBUG, root = %root.display(), "scanning directory recursively");
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
