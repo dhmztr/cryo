@@ -1,8 +1,8 @@
 ```
-  ____________  ______ 
+  ____________  ______
  / ___/ ___/ / / / __ \
 / /__/ /  / /_/ / /_/ /
-\___/_/   \__, /\____/ 
+\___/_/   \__, /\____/
          /____/
 ```
 
@@ -33,14 +33,14 @@ Binary lands at `target/release/cryo`.
 cryo compress <name> [options]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-P, --path <PATH>` | `./` | Source path |
-| `-r, --recursive` | false | Recurse into subdirectories |
-| `-c, --compression-level <N>` | `3` | zstd level (-7 to 22) |
-| `-e, --encryption-type <TYPE>` | `none` | `aes`, `chacha`, or `none` |
-| `--ep <PROFILE>` | `balanced` | Argon2 profile: `fast`, `balanced`, `paranoid` |
-| `--bs <SIZE>` | `512KiB` | Block size (e.g. `1MiB`, `256KiB`) |
+| Flag                           | Default    | Description                                    |
+| ------------------------------ | ---------- | ---------------------------------------------- |
+| `-P, --path <PATH>`            | `./`       | Source path                                    |
+| `-r, --recursive`              | false      | Recurse into subdirectories                    |
+| `-c, --compression-level <N>`  | `3`        | zstd level (-7 to 22)                          |
+| `-e, --encryption-type <TYPE>` | `none`     | `aes`, `chacha`, or `none`                     |
+| `--ep <PROFILE>`               | `balanced` | Argon2 profile: `fast`, `balanced`, `paranoid` |
+| `--bs <SIZE>`                  | `512KiB`   | Block size (e.g. `1MiB`, `256KiB`)             |
 
 ```sh
 cryo compress backup -P ./docs -r -c 9 -e aes
@@ -52,13 +52,24 @@ cryo compress backup -P ./docs -r -c 9 -e aes
 cryo decompress <archive.cryo> [options]
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-o, --output <DIR>` | `./` | Output directory (must be empty or new) |
+| Flag                 | Default | Description                             |
+| -------------------- | ------- | --------------------------------------- |
+| `-o, --output <DIR>` | `./`    | Output directory (must be empty or new) |
 
 ```sh
 cryo decompress backup.cryo -o ./restored
 ```
+
+### Append
+
+```sh
+cryo append --archive <DIR> --append <DIR>
+```
+
+| Flag        | Default | Description                                               |
+| ----------- | ------- | --------------------------------------------------------- |
+| `--archive` | `None`  | Select archive to append to (must be existing directory ) |
+| `--append`  | `None`  | Select which file/dir to append from (must exist)         |
 
 ### List
 
@@ -111,13 +122,13 @@ Files spanning multiple blocks are reassembled by slicing the relevant byte rang
 
 All limits have conservative defaults and can be raised per-decompression:
 
-| Flag | Default |
-|------|---------|
-| `--max-file-size` | 10 GiB |
-| `--max-block-size` | 256 MiB |
-| `--max-m-cost` | 1 GiB (Argon2 memory) |
-| `--max-index-size` | 100 MiB |
-| `--max-header-size` | 64 KiB |
+| Flag                | Default               |
+| ------------------- | --------------------- |
+| `--max-file-size`   | 10 GiB                |
+| `--max-block-size`  | 256 MiB               |
+| `--max-m-cost`      | 1 GiB (Argon2 memory) |
+| `--max-index-size`  | 100 MiB               |
+| `--max-header-size` | 64 KiB                |
 
 These exist to protect against malformed or malicious archives that claim enormous sizes before any data is read.
 
@@ -127,12 +138,12 @@ These exist to protect against malformed or malicious archives that claim enormo
 
 Measured on a 16-core machine, average of 3 runs:
 
-| | Time | Output size |
-|---|---|---|
-| cryo (sequential, pre-parallel) | 0.76s | 23 MiB |
-| **cryo (parallel worker pool)** | **0.28s** | 23 MiB |
-| `tar` + `gzip -6` | 2.26s | 49 MiB |
-| `tar` + `zstd` (default) | 0.45s | 21 MiB |
+|                                 | Time      | Output size |
+| ------------------------------- | --------- | ----------- |
+| cryo (sequential, pre-parallel) | 0.76s     | 23 MiB      |
+| **cryo (parallel worker pool)** | **0.28s** | 23 MiB      |
+| `tar` + `gzip -6`               | 2.26s     | 49 MiB      |
+| `tar` + `zstd` (default)        | 0.45s     | 21 MiB      |
 
 Parallelizing compression gives ~2.7x speedup over the sequential implementation with identical output size (block layout and compression level are unchanged, only how blocks get produced). `gzip` is both slower and produces a larger archive than either. `tar`+`zstd` streams the whole archive through one zstd context so it can find long-range matches across block/file boundaries that cryo's fixed-size block chunking can't see, which is why its ratio edges out cryo's on highly repetitive data; cryo's parallel path is still faster in wall-clock time on multi-core machines.
 
