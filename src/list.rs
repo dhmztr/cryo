@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::IsTerminal;
-use std::path::PathBuf;
+use std::path::Path;
 
 use bytesize::ByteSize;
 
@@ -61,8 +61,8 @@ fn print_human(structs: &FileStructs, archive_path: &str) {
     }
 
     println!(
-        "  \x1b[2m{:<9}  {:<4}  {:>10}  {:>5}  {:<19}  {}\x1b[0m",
-        "Perms", "Type", "Size", "Ratio", "Modified", "Path"
+        "  \x1b[2m{:<9}  {:<4}  {:>10}  {:>5}  {:<19}  Path\x1b[0m",
+        "Perms", "Type", "Size", "Ratio", "Modified"
     );
     println!("  {}", "\u{2500}".repeat(80));
 
@@ -78,10 +78,9 @@ fn print_human(structs: &FileStructs, archive_path: &str) {
         let (size_str, ratio_str) = match entry.ftype {
             FileType::File => {
                 let compr = structs.index.file_compressed_size(entry);
-                let ratio = if entry.size > 0 {
-                    format!("{:>4}%", compr * 100 / entry.size)
-                } else {
-                    "  --".to_string()
+                let ratio = match (compr * 100).checked_div(entry.size) {
+                    Some(r) => format!("{r:>4}%"),
+                    None => "  --".to_string(),
                 };
                 (format!("{:>10}", ByteSize(entry.size)), ratio)
             }
@@ -109,10 +108,9 @@ fn print_human(structs: &FileStructs, archive_path: &str) {
     }
 
     let total_compressed = structs.index.total_compressed_size();
-    let archive_ratio = if total_size > 0 {
-        format!("{}%", total_compressed * 100 / total_size)
-    } else {
-        "--".to_string()
+    let archive_ratio = match (total_compressed * 100).checked_div(total_size) {
+        Some(r) => format!("{r}%"),
+        None => "--".to_string(),
     };
 
     println!("  {}", "\u{2500}".repeat(80));
@@ -149,11 +147,7 @@ fn print_plain(structs: &FileStructs, archive_path: &str) {
         let (size, compressed, ratio) = match entry.ftype {
             FileType::File => {
                 let c = structs.index.file_compressed_size(entry);
-                let r = if entry.size > 0 {
-                    c * 100 / entry.size
-                } else {
-                    0
-                };
+                let r = (c * 100).checked_div(entry.size).unwrap_or(0);
                 (entry.size, c, r)
             }
             _ => (0, 0, 0),
@@ -189,11 +183,11 @@ fn print_json(structs: &FileStructs, archive_path: &str) {
     let total_compressed = structs.index.total_compressed_size();
 
     println!("{{");
-    println!("  \"archive\": {},", js(&archive_path.to_string()));
+    println!("  \"archive\": {},", js(archive_path));
     println!("  \"version\": {},", structs.header.version);
     println!(
         "  \"encryption\": {},",
-        js(&encryption_label(&structs.header.encryption).to_string())
+        js(encryption_label(&structs.header.encryption))
     );
     println!("  \"compression\": {},", structs.header.compression);
     println!("  \"block_size\": {},", structs.header.block_size);
@@ -215,11 +209,7 @@ fn print_json(structs: &FileStructs, archive_path: &str) {
         let (size, compressed, ratio) = match entry.ftype {
             FileType::File => {
                 let c = structs.index.file_compressed_size(entry);
-                let r = if entry.size > 0 {
-                    c * 100 / entry.size
-                } else {
-                    0
-                };
+                let r = (c * 100).checked_div(entry.size).unwrap_or(0);
                 (entry.size, c, r)
             }
             _ => (0, 0, 0),
@@ -311,8 +301,8 @@ fn days_to_ymd(days: i64) -> (i64, i64, i64) {
     (y, mo, d)
 }
 
-pub fn check_read_only_args_for_errors(archive: &PathBuf) -> Result<(), CryoErrors> {
-    if archive.extension().map_or(false, |e| e == "cryo") && archive.is_file() {
+pub fn check_read_only_args_for_errors(archive: &Path) -> Result<(), CryoErrors> {
+    if archive.extension().is_some_and(|e| e == "cryo") && archive.is_file() {
         Ok(())
     } else {
         Err(CryoErrors::InitializationError(

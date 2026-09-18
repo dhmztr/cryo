@@ -24,6 +24,7 @@ pub enum CryoErrors {
     ChecksumMismatch,
     InvalidPattern,
     ThreadError,
+    BackupRemovalFailed(PathBuf),
 }
 
 impl Display for CryoErrors {
@@ -91,6 +92,11 @@ impl Display for CryoErrors {
             Self::ThreadError => write!(
                 f,
                 "While using multithreading to process archive error has happened!"
+            ),
+            Self::BackupRemovalFailed(p) => write!(
+                f,
+                "Succesfuly appended the file, yet failed to remove backup from {}",
+                p.display()
             ),
         }
     }

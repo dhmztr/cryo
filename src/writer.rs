@@ -71,8 +71,8 @@ impl ArchiveWriter {
             .map_err(|_| CryoErrors::WriteError)?;
 
         Ok(ArchiveWriter {
-            writer: writer,
-            index: index,
+            writer,
+            index,
             stream_position: 0,
             file_position: bytes_to_write.len() as u64,
             pending: vec![],
@@ -114,6 +114,12 @@ impl ArchiveWriter {
             .write_all(&footer_bytes)
             .map_err(|_| CryoErrors::WriteError)?;
         self.writer.flush().map_err(|_| CryoErrors::WriteError)?;
+        let final_len =
+            self.file_position + encrypted_index.len() as u64 + footer_bytes.len() as u64;
+        self.writer
+            .get_ref()
+            .set_len(final_len)
+            .map_err(|_| CryoErrors::WriteError)?;
         Ok(())
     }
 
@@ -138,7 +144,7 @@ impl ArchiveWriter {
             size_plain,
             size_stored,
             is_compressed,
-            checksum: blake3::hash(&raw_block).into(),
+            checksum: blake3::hash(raw_block).into(),
         });
         self.file_position += enc_block.len() as u64;
 

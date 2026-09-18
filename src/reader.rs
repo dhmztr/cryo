@@ -22,12 +22,7 @@ pub struct ArchiveReader {
 }
 
 impl ArchiveReader {
-    pub(crate) fn new(
-        f: File,
-        p: &PathBuf,
-        out: PathBuf,
-        limits: Limits,
-    ) -> Result<Self, CryoErrors> {
+    pub(crate) fn new(f: File, p: &Path, out: PathBuf, limits: Limits) -> Result<Self, CryoErrors> {
         let structs = FileStructs::retrieve(&f, p, &limits)?;
         let reader = BufReader::new(f);
 
@@ -87,7 +82,7 @@ impl ArchiveReader {
                 None
             };
             let out_dir = safe_output_path(&self.root, f.path.as_path())?;
-            let blocks = build_block_ranges(&self.index.block.as_slice());
+            let blocks = build_block_ranges(self.index.block.as_slice());
             self.extract_file(f, out_dir.as_path(), &blocks, pb_file.as_ref())?;
 
             if let Some(pb) = pb_file {
@@ -143,7 +138,7 @@ impl ArchiveReader {
             std::os::unix::fs::symlink(target, out_dir).map_err(|_| CryoErrors::WriteError)?;
             return Ok(());
         }
-        let file = File::create(&out_dir).map_err(|_| CryoErrors::WriteError)?;
+        let file = File::create(out_dir).map_err(|_| CryoErrors::WriteError)?;
         let mut writer = BufWriter::with_capacity(self.header.block_size as usize, file);
         let system_time = UNIX_EPOCH + Duration::from_secs(f.timestamp);
         let first = blocks.partition_point(|(_, end)| *end <= file_start);
@@ -158,9 +153,8 @@ impl ArchiveReader {
             "extract filter"
         );
 
-        for i in first..blocks.len() {
+        for (i, &(start, end)) in blocks.iter().enumerate().skip(first) {
             let block = self.index.block[i].clone();
-            let (start, end) = blocks[i];
             if end <= file_start || start >= file_end {
                 event!(
                     Level::DEBUG,
@@ -281,20 +275,20 @@ impl ArchiveReader {
         };
         Ok(plain)
     }
-    pub(crate) fn verify(&mut self, p: &PathBuf) -> Result<(), CryoErrors> {
+    pub(crate) fn verify(&mut self, p: &Path) -> Result<(), CryoErrors> {
         let blocks: Vec<BlockEntry> = self.index.block.clone();
         for (i, block) in blocks.iter().enumerate() {
             self.reader
                 .seek(SeekFrom::Start(block.offset))
                 .map_err(|e| CryoErrors::ReadFailed {
-                    p: p.clone(),
+                    p: p.to_path_buf(),
                     source: e,
                 })?;
             let mut stored = vec![0u8; block.size_stored as usize];
             self.reader
                 .read_exact(&mut stored)
                 .map_err(|e| CryoErrors::ReadFailed {
-                    p: p.clone(),
+                    p: p.to_path_buf(),
                     source: e,
                 })?;
 
@@ -399,7 +393,8 @@ mod tests {
     fn block_filter_file_at_start() {
         let blocks = [make_block(100, 80), make_block(100, 60)];
         let ranges = build_block_ranges(&blocks);
-        let first = ranges.partition_point(|(_, end)| *end <= 0);
+        let file_start = 0u64;
+        let first = ranges.partition_point(|(_, end)| *end <= file_start);
         assert_eq!(first, 0);
     }
 

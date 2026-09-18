@@ -68,7 +68,7 @@ pub fn encrypt_block(
     let (nonce, aad) = match encd {
         EncryptedData::Block => {
             let block_num = block_id;
-            let nonce = block_nonce(&nonce_base, block_num);
+            let nonce = block_nonce(nonce_base, block_num);
             let mut aad = [0u8; 24];
             aad[..8].copy_from_slice(&block_num.to_le_bytes());
             aad[8..].copy_from_slice(archive_id);
@@ -77,7 +77,7 @@ pub fn encrypt_block(
         }
         EncryptedData::Index => {
             let block_num = u64::MAX;
-            let nonce = block_nonce(&nonce_base, block_num);
+            let nonce = block_nonce(nonce_base, block_num);
             let mut aad = [0u8; 24];
             aad[..8].copy_from_slice(&block_num.to_le_bytes());
             aad[8..].copy_from_slice(archive_id);
