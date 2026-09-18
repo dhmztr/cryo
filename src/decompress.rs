@@ -5,7 +5,7 @@ use crate::filter::build_matcher;
 use crate::format::FileEntry;
 use crate::reader::ArchiveReader;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::{fs::File, path::PathBuf};
+use std::{fs::File, path::Path};
 use tracing::{Level, event};
 
 pub(crate) fn initialize_decompression(args: DecompressArgs) -> Result<(), CryoErrors> {
@@ -18,23 +18,15 @@ pub(crate) fn initialize_decompression(args: DecompressArgs) -> Result<(), CryoE
         output = %output_dir.display(),
         "starting decompression"
     );
-    let max_m_cost = if let Some(max_m) = args.max_m_cost {
-        Some((max_m / 1024) as u32)
-    } else {
-        None
-    };
-    let max_header_size: Option<usize> = if let Some(max_h) = args.max_header_size {
-        Some((max_h / 1024) as usize)
-    } else {
-        None
-    };
+    let max_m_cost = args.max_m_cost.map(|max_m| (max_m / 1024) as u32);
+    let max_header_size: Option<usize> = args.max_header_size.map(|max_h| (max_h / 1024) as usize);
     let filter = build_matcher(&args.filter)?;
     check_decompression_for_arg_err(&arv_name, &output_dir)?;
     let defaults = Limits::default();
     let limits = Limits {
         max_file_size: args.max_file_size.unwrap_or(defaults.max_file_size),
         max_block_size: args.max_block_size.unwrap_or(defaults.max_block_size),
-        max_m_cost: max_m_cost.unwrap_or(defaults.max_m_cost as u32),
+        max_m_cost: max_m_cost.unwrap_or(defaults.max_m_cost),
         max_index_size: args.max_index_size.unwrap_or(defaults.max_index_size),
         max_header_size: max_header_size.unwrap_or(defaults.max_header_size),
     };
@@ -89,16 +81,13 @@ pub(crate) fn initialize_decompression(args: DecompressArgs) -> Result<(), CryoE
     Ok(())
 }
 
-pub(crate) fn check_decompression_for_arg_err(
-    arv: &PathBuf,
-    out: &PathBuf,
-) -> Result<(), CryoErrors> {
+pub(crate) fn check_decompression_for_arg_err(arv: &Path, out: &Path) -> Result<(), CryoErrors> {
     out.parent().ok_or_else(|| {
         CryoErrors::InitializationError(String::from("Parent directory for output doesn't exist"))
     })?;
     if out.exists() && out.is_dir() {
         let out_dir = out.read_dir().map_err(|e| CryoErrors::ReadFailed {
-            p: out.clone(),
+            p: out.to_path_buf(),
             source: e,
         })?;
         if out_dir.count() != 0 {

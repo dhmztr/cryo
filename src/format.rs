@@ -89,6 +89,7 @@ pub(crate) struct Footer {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Serialize, Deserialize)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum EncryptionType {
     AES,
     ChaCha,
@@ -135,12 +136,12 @@ impl Header {
             magic: MAGIC,
             version: VERSION,
             encryption,
-            compression: compression,
+            compression,
             argon_salt: salt,
             argon_params: profile.params(),
-            archive_id: archive_id,
+            archive_id,
             block_size: bs,
-            nonce_base: nonce_base,
+            nonce_base,
         }
     }
 }

@@ -3,7 +3,7 @@ use crate::consts::{Limits, MAX_BLOCK_SIZE, MAX_HEADER_SIZE, MAX_INDEX_SIZE, MAX
 use crate::errors::CryoErrors;
 use crate::format::{EncryptedData, Footer, Header, Index};
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::{fs::File, path::PathBuf};
+use std::{fs::File, path::Path};
 use tracing::{Level, event};
 
 pub(crate) struct FileStructs {
@@ -14,13 +14,13 @@ pub(crate) struct FileStructs {
 }
 
 impl FileStructs {
-    pub(crate) fn retrieve(f: &File, p: &PathBuf, limits: &Limits) -> Result<Self, CryoErrors> {
+    pub(crate) fn retrieve(f: &File, p: &Path, limits: &Limits) -> Result<Self, CryoErrors> {
         let mut header_size_bytes: [u8; 4] = [0u8; 4];
         let mut reader = BufReader::new(f);
         reader
             .read_exact(&mut header_size_bytes)
             .map_err(|e| CryoErrors::ReadFailed {
-                p: p.clone(),
+                p: p.to_path_buf(),
                 source: e,
             })?;
         let header_size = u32::from_le_bytes(header_size_bytes) as usize;
@@ -40,7 +40,7 @@ impl FileStructs {
         reader
             .read_exact(&mut header_bytes)
             .map_err(|e| CryoErrors::ReadFailed {
-                p: p.clone(),
+                p: p.to_path_buf(),
                 source: e,
             })?;
         let header = rmp_serde::from_slice::<Header>(&header_bytes)
@@ -71,14 +71,14 @@ impl FileStructs {
         reader
             .seek(SeekFrom::End(-17))
             .map_err(|e| CryoErrors::ReadFailed {
-                p: p.clone(),
+                p: p.to_path_buf(),
                 source: e,
             })?;
         let mut footer_bytes: [u8; 17] = [0u8; 17];
         reader
             .read_exact(&mut footer_bytes)
             .map_err(|e| CryoErrors::ReadFailed {
-                p: p.clone(),
+                p: p.to_path_buf(),
                 source: e,
             })?;
         let footer = Footer::deserialize(footer_bytes)?;
@@ -99,14 +99,14 @@ impl FileStructs {
         reader
             .seek(SeekFrom::Start(footer.index_offset))
             .map_err(|e| CryoErrors::ReadFailed {
-                p: p.clone(),
+                p: p.to_path_buf(),
                 source: e,
             })?;
 
         reader
             .read_exact(&mut index_bytes)
             .map_err(|e| CryoErrors::ReadFailed {
-                p: p.clone(),
+                p: p.to_path_buf(),
                 source: e,
             })?;
 

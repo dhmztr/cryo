@@ -36,7 +36,7 @@ pub(crate) fn safe_output_path(root: &Path, relative: &Path) -> Result<PathBuf, 
     Ok(joined)
 }
 
-pub(crate) fn normalize(path: &PathBuf) -> PathBuf {
+pub(crate) fn normalize(path: &Path) -> PathBuf {
     let mut stack: Vec<Component> = Vec::new();
     path.components().for_each(|c| match c {
         Component::Normal(_) => stack.push(c),

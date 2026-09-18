@@ -137,6 +137,7 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
             &mut pending_buffer,
             block_size,
             &raw_tx,
+            pb_bytes.as_ref(),
         )?;
 
         if let Some(pb) = pb_bytes {
@@ -155,7 +156,7 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
     drop(raw_tx);
     workers_handle.join().unwrap()?;
     let _ = reader_writer_tx.send(WriterMessage::Finalize {
-        files: files,
+        files,
         total_stream_size: stream_position,
     });
     writer_handle.join().unwrap()?;
@@ -164,6 +165,7 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn read_file_to_bytes(
     p: &Path,
     root: &Path,
@@ -173,6 +175,7 @@ pub fn read_file_to_bytes(
     pending_buffer: &mut Vec<u8>,
     block_size: usize,
     raw_tx: &Sender<RawBlock>,
+    pb: Option<&ProgressBar>,
 ) -> Result<(), CryoErrors> {
     let fmetadata = fs::symlink_metadata(p).map_err(|e| CryoErrors::ReadFailed {
         p: p.to_path_buf(),
@@ -186,7 +189,7 @@ pub fn read_file_to_bytes(
         FileType::File
     };
     let stripped = p
-        .strip_prefix(&root)
+        .strip_prefix(root)
         .map_err(|_| CryoErrors::InvalidPath)?
         .to_path_buf();
 
@@ -222,6 +225,9 @@ pub fn read_file_to_bytes(
         }
         pending_buffer.extend_from_slice(&chunk[..n]);
         *stream_position += n as u64;
+        if let Some(pb) = pb {
+            pb.inc(n as u64);
+        }
         while pending_buffer.len() >= block_size {
             let block_data: Vec<u8> = pending_buffer.drain(..block_size).collect();
             let _ = raw_tx.send(RawBlock {
@@ -275,8 +281,8 @@ pub fn retrieve_all_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), Cry
     Ok(())
 }
 
-fn check_compression_for_arg_err(s: &String, p: &Path, c: i32, r: bool) -> Result<(), CryoErrors> {
-    if s.as_str() == "" {
+fn check_compression_for_arg_err(s: &str, p: &Path, c: i32, r: bool) -> Result<(), CryoErrors> {
+    if s.is_empty() {
         Err(CryoErrors::EmptyArchiveName)
     } else if !p.exists() || (!p.is_dir() && r) {
         Err(CryoErrors::InvalidPath)
