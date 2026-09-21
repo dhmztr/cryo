@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Porównuje każdy algorytm cryo z tym samym algorytmem w klasycznym `tar | <kompresor>`.
-# Ten sam korpus, ten sam poziom kompresji — mierzy czas pakowania, rozpakowania i rozmiar.
-#
-# Uwaga na interpretację: cryo pakuje blokowo na wielu wątkach, a `tar | gzip` to jeden
-# strumień na jednym rdzeniu. Różnica czasu to w dużej części właśnie to, nie sam kodek.
+# Compare each cryo algorithm against the same algorithm via `tar | <compressor>`,
+# on the same corpus and level: compress time, decompress time, and size.
+# Note: cryo packs blocks across threads while `tar | gzip` is one stream on one
+# core, so much of the time difference is that, not the codec itself.
 #
 # ENV: CRYO_BIN, CORPUS_MB, FILES, ALGOS, BS, ZSTD_LEVEL, GZIP_LEVEL, XZ_LEVEL
 set -euo pipefail
@@ -26,7 +25,7 @@ if [ ! -x "$CRYO_BIN" ]; then
     cargo build --release
 fi
 
-# ── korpus: powtarzalne logi, dobrze się kompresują ──
+# corpus: repetitive logs that compress well
 mkdir -p "$DATA"
 base="$WORK/base.txt"
 for i in $(seq 1 20000); do
@@ -46,14 +45,13 @@ secs() { awk "BEGIN { printf \"%.2f\", ($2 - $1) / 1000000000 }"; }
 
 human() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || echo "${1}B"; }
 
-# czas w s -> MB/s liczone względem rozmiaru korpusu
 throughput() { awk "BEGIN { printf \"%.0f\", ($CORPUS_BYTES / 1048576) / ($1 > 0 ? $1 : 0.001) }"; }
 
 ratio() { awk "BEGIN { printf \"%.1fx\", $CORPUS_BYTES / ($1 > 0 ? $1 : 1) }"; }
 
 row() { printf "%-6s %-12s %9s %9s %11s %7s %9s %6s\n" "$@"; }
 
-# ustawia globalne COMP/DECOMP/EXT/LEVEL dla danego algorytmu
+# sets global COMP/DECOMP/EXT/LEVEL for the given algorithm
 setup_algo() {
     case "$1" in
     zstd)
@@ -69,14 +67,14 @@ setup_algo() {
         LEVEL="0" COMP="cat" DECOMP="cat" EXT="tar"
         ;;
     *)
-        echo "nieznany algorytm: $1" >&2
+        echo "unknown algorithm: $1" >&2
         return 1
         ;;
     esac
 }
 
-# "ok" jeśli rozpakowane drzewo ma tyle bajtów co korpus — chroni przed
-# benchmarkowaniem cichej korupcji
+# "ok" if the extracted tree has the same byte count as the corpus, guarding
+# against benchmarking silent corruption
 check_bytes() {
     if [ "$(du -sb "$1" | cut -f1)" = "$CORPUS_BYTES" ]; then echo ok; else echo BAD; fi
 }
@@ -123,10 +121,10 @@ bench_tar() {
     rm -rf "$out" "$archive"
 }
 
-echo "korpus:  $(human "$CORPUS_BYTES") w $FILES plikach"
-echo "cryo:    $CRYO_BIN (blok $BS, wielowątkowo)"
-echo "tar:     jeden strumień, jeden rdzeń"
-echo "poziomy: zstd=$ZSTD_LEVEL gzip=$GZIP_LEVEL xz=$XZ_LEVEL"
+echo "corpus:  $(human "$CORPUS_BYTES") in $FILES files"
+echo "cryo:    $CRYO_BIN (block $BS, multithreaded)"
+echo "tar:     single stream, single core"
+echo "levels:  zstd=$ZSTD_LEVEL gzip=$GZIP_LEVEL xz=$XZ_LEVEL"
 echo
 row "algo" "tool" "compress" "decomp" "size" "ratio" "MB/s" "ok"
 row "----" "----" "--------" "------" "----" "-----" "----" "--"
@@ -136,7 +134,7 @@ for algo in $ALGOS; do
 
     bench_cryo "$algo"
 
-    # tar potrzebuje zewnętrznego narzędzia; cryo ma kodeki wkompilowane
+    # tar needs an external tool; cryo has the codecs built in
     tool="${COMP%% *}"
     if command -v "$tool" >/dev/null 2>&1; then
         bench_tar "$algo"
