@@ -26,6 +26,7 @@ pub enum CryoErrors {
     InvalidPattern,
     ThreadError,
     BackupRemovalFailed(PathBuf),
+    NotSupported,
 }
 
 impl Display for CryoErrors {
@@ -103,6 +104,7 @@ impl Display for CryoErrors {
                 f,
                 "When trying to decompress archive encountered possible zip bomb!"
             ),
+            Self::NotSupported => write!(f, "Archive version not supported"),
         }
     }
 }

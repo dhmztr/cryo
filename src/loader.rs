@@ -47,11 +47,13 @@ impl FileStructs {
         let header = rmp_serde::from_slice::<Header>(&header_bytes)
             .map_err(|_| CryoErrors::DeserializationFailed)?;
         event!(Level::DEBUG, "Header: {:#?}", header);
+        verify_version_support(&header)?;
         let eff_max_block = if limits.max_block_size == 0 {
             MAX_BLOCK_SIZE
         } else {
             limits.max_block_size
         };
+
         if header.block_size > eff_max_block {
             return Err(CryoErrors::BlockTooLarge {
                 size: header.block_size,
@@ -144,5 +146,13 @@ impl FileStructs {
             cipher,
             footer,
         })
+    }
+}
+
+pub fn verify_version_support(h: &Header) -> Result<(), CryoErrors> {
+    if h.version != crate::consts::VERSION {
+        Err(CryoErrors::NotSupported)
+    } else {
+        Ok(())
     }
 }
