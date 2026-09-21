@@ -10,6 +10,7 @@ pub enum CryoErrors {
     InvalidPath,
     SerializationFailed,
     DeserializationFailed,
+    PossibleZipBomb,
     RecursiveLookupFailed { p: PathBuf, source: std::io::Error },
     ReadFailed { p: PathBuf, source: std::io::Error },
     UnsafePath(PathBuf),
@@ -97,6 +98,10 @@ impl Display for CryoErrors {
                 f,
                 "Succesfuly appended the file, yet failed to remove backup from {}",
                 p.display()
+            ),
+            Self::PossibleZipBomb => write!(
+                f,
+                "When trying to decompress archive encountered possible zip bomb!"
             ),
         }
     }

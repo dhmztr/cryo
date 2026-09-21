@@ -1,10 +1,12 @@
 use crate::codec::{Cipher, block_nonce};
+use crate::engine::CompressingEngine;
 use crate::errors::CryoErrors;
 use crate::format::{BlockEntry, EncryptedData, FileEntry, Footer, Header, Index};
 use aes_gcm::aead::Aead;
 use aes_gcm::aead::Payload;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use rand_core::{OsRng, RngCore};
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 
@@ -90,21 +92,25 @@ impl ArchiveWriter {
         self.index.total_stream_size = self.stream_position;
         let index_bytes =
             rmp_serde::to_vec(&self.index).map_err(|_| CryoErrors::SerializationFailed)?;
-        let compr_index_bytes = zstd::encode_all(index_bytes.as_slice(), self.header.compression)
-            .map_err(|_| CryoErrors::CompressionError)?;
+        let mut engine =
+            CompressingEngine::new(&self.header.compression, self.header.compression_level)?;
+        let compr_index_bytes = engine.engine.compress(index_bytes.as_slice())?;
         let index_size_plain = index_bytes.len() as u32;
         let (smaller, index_compressed) = if index_size_plain as usize > compr_index_bytes.len() {
             (compr_index_bytes, true)
         } else {
             (index_bytes, false)
         };
-        let encrypted_index = self.encrypt_block(&smaller, EncryptedData::Index)?;
+        let mut index_nonce = [0u8; 12];
+        OsRng.fill_bytes(&mut index_nonce);
+        let encrypted_index = self.encrypt_block(&smaller, EncryptedData::Index(index_nonce))?;
 
         let footer = Footer {
             index_offset: self.file_position,
             index_size_stored: encrypted_index.len() as u32,
             index_size_plain,
             index_compressed,
+            index_nonce,
         };
         self.writer
             .write_all(&encrypted_index)
@@ -125,9 +131,9 @@ impl ArchiveWriter {
 
     fn flush_block(&mut self, raw_block: &[u8]) -> Result<(), CryoErrors> {
         let size_plain = raw_block.len() as u32;
-        let block_compressed = zstd::encode_all(raw_block, self.header.compression)
-            .map_err(|_| CryoErrors::CompressionError)?;
-
+        let mut engine =
+            CompressingEngine::new(&self.header.compression, self.header.compression_level)?;
+        let block_compressed = engine.engine.compress(raw_block)?;
         let (payload, is_compressed): (&[u8], bool) = if block_compressed.len() < raw_block.len() {
             (&block_compressed, true)
         } else {
@@ -161,9 +167,8 @@ impl ArchiveWriter {
 
                 (nonce, aad)
             }
-            EncryptedData::Index => {
+            EncryptedData::Index(nonce) => {
                 let block_num = u64::MAX;
-                let nonce = block_nonce(&self.header.nonce_base, block_num);
                 let mut aad = [0u8; 24];
                 aad[..8].copy_from_slice(&block_num.to_le_bytes());
                 aad[8..].copy_from_slice(&self.header.archive_id);

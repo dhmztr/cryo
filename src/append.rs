@@ -60,7 +60,8 @@ pub fn append_file(args: AppendArgs) -> Result<(), CryoErrors> {
             structs.cipher,
             structs.header.nonce_base,
             structs.header.archive_id,
-            structs.header.compression,
+            &structs.header.compression,
+            structs.header.compression_level,
         )
     });
     let mut archive = ArchiveWriter {
@@ -175,12 +176,16 @@ pub fn append_file(args: AppendArgs) -> Result<(), CryoErrors> {
         });
     }
     drop(raw_tx);
-    workers_handle.join().unwrap()?;
+    workers_handle
+        .join()
+        .map_err(|_| CryoErrors::ThreadError)??;
     let _ = reader_writer_tx.send(WriterMessage::Finalize {
         files,
         total_stream_size: stream_pos,
     });
-    writer_handle.join().unwrap()?;
+    writer_handle
+        .join()
+        .map_err(|_| CryoErrors::ThreadError)??;
     std::fs::remove_file(&backup_path).map_err(|_| CryoErrors::BackupRemovalFailed(backup_path))?;
 
     Ok(())

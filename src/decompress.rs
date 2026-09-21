@@ -19,7 +19,7 @@ pub(crate) fn initialize_decompression(args: DecompressArgs) -> Result<(), CryoE
         "starting decompression"
     );
     let max_m_cost = args.max_m_cost.map(|max_m| (max_m / 1024) as u32);
-    let max_header_size: Option<usize> = args.max_header_size.map(|max_h| (max_h / 1024) as usize);
+    let max_header_size: Option<usize> = args.max_header_size.map(|max_h| max_h as usize);
     let filter = build_matcher(&args.filter)?;
     check_decompression_for_arg_err(&arv_name, &output_dir)?;
     let defaults = Limits::default();

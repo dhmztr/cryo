@@ -4,8 +4,6 @@ use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit};
 use argon2::{Argon2, Params};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use std::io::Read;
-use zstd::Decoder;
 
 pub(crate) fn block_nonce(base: &[u8; 12], block_num: u64) -> [u8; 12] {
     let mut nonce = *base;
@@ -75,9 +73,8 @@ pub fn encrypt_block(
 
             (nonce, aad)
         }
-        EncryptedData::Index => {
+        EncryptedData::Index(nonce) => {
             let block_num = u64::MAX;
-            let nonce = block_nonce(nonce_base, block_num);
             let mut aad = [0u8; 24];
             aad[..8].copy_from_slice(&block_num.to_le_bytes());
             aad[8..].copy_from_slice(archive_id);
@@ -131,9 +128,8 @@ pub(crate) fn decrypt_block(
 ) -> Result<Vec<u8>, CryoErrors> {
     if !matches!(c, Cipher::None) {
         let (nonce, aad) = match encd {
-            EncryptedData::Index => {
+            EncryptedData::Index(nonce) => {
                 let block_num = u64::MAX;
-                let nonce = block_nonce(&h.nonce_base, block_num);
                 let mut aad = [0u8; 24];
                 aad[..8].copy_from_slice(&block_num.to_le_bytes());
                 aad[8..].copy_from_slice(&h.archive_id);
@@ -190,34 +186,6 @@ pub(crate) fn decrypt_block(
     } else {
         Ok(payload.to_owned())
     }
-}
-
-pub(crate) fn decompress_block(
-    block: Vec<u8>,
-    h: &Header,
-    max_size: u64,
-) -> Result<Vec<u8>, CryoErrors> {
-    let mut decoder = Decoder::new(block.as_slice()).map_err(|_| CryoErrors::DecompressionError)?;
-    let mut out: Vec<u8> = Vec::with_capacity(h.block_size as usize);
-    let mut buf: [u8; 8192] = [0u8; 8192];
-    let mut total: u64 = 0;
-    loop {
-        let n = decoder
-            .read(&mut buf)
-            .map_err(|_| CryoErrors::DecompressionError)?;
-        if n == 0 {
-            break;
-        }
-        total += n as u64;
-        if total > max_size {
-            return Err(CryoErrors::BlockTooLarge {
-                size: total,
-                limit: max_size,
-            });
-        }
-        out.extend_from_slice(&buf[..n]);
-    }
-    Ok(out)
 }
 
 #[cfg(test)]
