@@ -1,5 +1,6 @@
 use crate::cli::CompressArgs;
 use crate::codec::{Cipher, encrypt_block};
+use crate::engine::{CompressingEngine, Compressor};
 use crate::errors::CryoErrors;
 use crate::format::{BlockEntry, EncryptedData, FileEntry, FileType, Header};
 use crate::writer::{ArchiveWriter, RawBlock};
@@ -21,9 +22,10 @@ use std::{
 use tracing::{Level, event};
 
 pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoErrors> {
-    let (arv_name, path, com_level, enc_type, recursive, eparams, bs) = (
+    let (arv_name, path, compression, com_level, enc_type, recursive, eparams, bs) = (
         args.archive_name,
         args.path_to_compress,
+        args.compression,
         args.compression_level,
         args.encryption_type,
         args.recursive,
@@ -44,7 +46,7 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
         "starting compression"
     );
 
-    check_compression_for_arg_err(&arv_name, path.as_path(), com_level, recursive)?;
+    check_compression_for_arg_err(&arv_name, path.as_path(), recursive)?;
 
     let mut files_to_compress: Vec<PathBuf> = vec![];
     if recursive {
@@ -83,7 +85,7 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
     .unwrap()
     .progress_chars("=>-");
 
-    let h = Header::new(eparams, com_level, bs, enc_type);
+    let h = Header::new(eparams, compression, com_level, bs, enc_type);
     let mut archive = ArchiveWriter::new(&arv_name, h.clone())?;
     let mut files = Vec::new();
     let mut stream_position = 0u64;
@@ -98,7 +100,8 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
             archive.cipher,
             archive.header.nonce_base,
             archive.header.archive_id,
-            archive.header.compression,
+            &archive.header.compression,
+            archive.header.compression_level,
         )
     });
     let writer_handle = thread::spawn(move || writer(reader_writer_rx, &mut archive));
@@ -154,12 +157,16 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
         });
     }
     drop(raw_tx);
-    workers_handle.join().unwrap()?;
+    workers_handle
+        .join()
+        .map_err(|_| CryoErrors::ThreadError)??;
     let _ = reader_writer_tx.send(WriterMessage::Finalize {
         files,
         total_stream_size: stream_position,
     });
-    writer_handle.join().unwrap()?;
+    writer_handle
+        .join()
+        .map_err(|_| CryoErrors::ThreadError)??;
 
     event!(Level::DEBUG, archive = %arv_name, "compression finished");
     Ok(())
@@ -281,13 +288,11 @@ pub fn retrieve_all_files(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), Cry
     Ok(())
 }
 
-fn check_compression_for_arg_err(s: &str, p: &Path, c: i32, r: bool) -> Result<(), CryoErrors> {
+fn check_compression_for_arg_err(s: &str, p: &Path, r: bool) -> Result<(), CryoErrors> {
     if s.is_empty() {
         Err(CryoErrors::EmptyArchiveName)
     } else if !p.exists() || (!p.is_dir() && r) {
         Err(CryoErrors::InvalidPath)
-    } else if c > 22 {
-        Err(CryoErrors::InvalidCompressionLevel)
     } else {
         Ok(())
     }
@@ -386,6 +391,7 @@ pub fn spawn_workers(
     cipher: Cipher,
     nonce_base: [u8; 12],
     archive_id: [u8; 16],
+    compression: &Compressor,
     level: i32,
 ) -> Result<(), CryoErrors> {
     let writer_tx = Mutex::new(writer_tx);
@@ -393,7 +399,14 @@ pub fn spawn_workers(
         .into_iter()
         .par_bridge()
         .try_for_each(|raw_block| -> Result<(), CryoErrors> {
-            let processed = process_block(raw_block, cipher, &nonce_base, &archive_id, level)?;
+            let processed = process_block(
+                raw_block,
+                cipher,
+                &nonce_base,
+                &archive_id,
+                compression,
+                level,
+            )?;
             writer_tx
                 .lock()
                 .map_err(|_| CryoErrors::ThreadError)?
@@ -408,12 +421,14 @@ fn process_block(
     cipher: Cipher,
     nonce_base: &[u8; 12],
     archive_id: &[u8; 16],
+    compression: &Compressor,
     level: i32,
 ) -> Result<ProcessedBlock, CryoErrors> {
     let checksum = blake3::hash(&block.raw_data);
+    let mut compressor = CompressingEngine::new(compression, level)?;
+
     let size_plain = block.raw_data.len() as u32;
-    let compressed = zstd::encode_all(block.raw_data.as_slice(), level)
-        .map_err(|_| CryoErrors::CompressionError)?;
+    let compressed = compressor.engine.compress(block.raw_data.as_slice())?;
     let (to_encrypt, is_compressed) = if compressed.len() as u32 > size_plain {
         (block.raw_data, false)
     } else {

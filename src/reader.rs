@@ -1,5 +1,6 @@
 use crate::codec::{Cipher, decrypt_block};
-use crate::consts::{Limits, MAX_FILE_SIZE};
+use crate::consts::{Limits, MAX_FILE_SIZE, STORED_BLOCK_OVERHEAD};
+use crate::engine::DecompressingEngine;
 use crate::errors::CryoErrors;
 use crate::format::{BlockEntry, EncryptedData, FileEntry, FileType, Header, Index};
 use crate::loader::FileStructs;
@@ -14,6 +15,7 @@ use tracing::{Level, event};
 
 pub struct ArchiveReader {
     pub(crate) root: PathBuf,
+    pub(crate) path: PathBuf,
     pub(crate) reader: BufReader<File>,
     pub(crate) index: Index,
     pub(crate) header: Header,
@@ -28,6 +30,7 @@ impl ArchiveReader {
 
         Ok(ArchiveReader {
             root: out,
+            path: p.to_path_buf(),
             reader,
             header: structs.header,
             cipher: structs.cipher,
@@ -124,12 +127,15 @@ impl ArchiveReader {
         }
         if matches!(f.ftype, FileType::Symlink) {
             let target = f.symlink_target.as_ref().ok_or(CryoErrors::WriteError)?;
-            let link_dir = out_dir.parent().unwrap_or(Path::new(""));
-            let resolved = normalize(&link_dir.join(target));
             let canonical_root = self
                 .root
                 .canonicalize()
                 .map_err(|_| CryoErrors::InvalidPath)?;
+            let link_dir = out_dir.parent().unwrap_or(&self.root);
+            let canonical_link_dir = link_dir
+                .canonicalize()
+                .map_err(|_| CryoErrors::InvalidPath)?;
+            let resolved = normalize(&canonical_link_dir.join(target));
             if !resolved.starts_with(&canonical_root) {
                 return Err(CryoErrors::UnsafePath(target.clone()));
             }
@@ -152,6 +158,7 @@ impl ArchiveReader {
             total_blocks = blocks.len(),
             "extract filter"
         );
+        let mut engine = DecompressingEngine::new(&self.header.compression)?;
 
         for (i, &(start, end)) in blocks.iter().enumerate().skip(first) {
             let block = self.index.block[i].clone();
@@ -184,9 +191,12 @@ impl ArchiveReader {
                 bytes = take_end - take_start,
                 "reading block slice"
             );
-            let plain = self.read_block(&block, i)?;
+            let plain = self.read_block(&block, i, &mut engine)?;
             let calc_checksum = blake3::hash(&plain);
             if *calc_checksum.as_bytes() != block.checksum {
+                return Err(CryoErrors::DecompressionError);
+            }
+            if take_start > take_end || take_end > plain.len() {
                 return Err(CryoErrors::DecompressionError);
             }
             writer
@@ -216,6 +226,7 @@ impl ArchiveReader {
         &mut self,
         block: &BlockEntry,
         block_num: usize,
+        engine: &mut DecompressingEngine,
     ) -> Result<Vec<u8>, CryoErrors> {
         if block.size_plain as u64 > self.header.block_size {
             return Err(CryoErrors::BlockTooLarge {
@@ -223,17 +234,24 @@ impl ArchiveReader {
                 limit: self.header.block_size,
             });
         }
+        let max_stored = self.header.block_size.saturating_add(STORED_BLOCK_OVERHEAD);
+        if block.size_stored as u64 > max_stored {
+            return Err(CryoErrors::BlockTooLarge {
+                size: block.size_stored as u64,
+                limit: max_stored,
+            });
+        }
         self.reader
             .seek(SeekFrom::Start(block.offset))
             .map_err(|e| CryoErrors::ReadFailed {
-                p: PathBuf::from("./"),
+                p: self.path.clone(),
                 source: e,
             })?;
         let mut stored = vec![0u8; block.size_stored as usize];
         self.reader
             .read_exact(&mut stored)
             .map_err(|e| CryoErrors::ReadFailed {
-                p: PathBuf::from("./"),
+                p: self.path.clone(),
                 source: e,
             })?;
         let decrypted = if !matches!(self.cipher, Cipher::None) {
@@ -248,36 +266,29 @@ impl ArchiveReader {
             stored
         };
         let plain = if block.is_compressed {
-            let mut decoder = zstd::Decoder::new(decrypted.as_slice())
-                .map_err(|_| CryoErrors::DecompressionError)?;
-            let mut out = Vec::with_capacity(block.size_plain as usize);
-            let mut buf = [0u8; 8192];
-            let mut total = 0u64;
-            loop {
-                let n = decoder
-                    .read(&mut buf)
-                    .map_err(|_| CryoErrors::DecompressionError)?;
-                if n == 0 {
-                    break;
-                }
-                total += n as u64;
-                if total > self.header.block_size {
-                    return Err(CryoErrors::BlockTooLarge {
-                        size: total,
-                        limit: self.header.block_size,
-                    });
-                }
-                out.extend_from_slice(&buf[..n]);
-            }
-            out
+            engine
+                .engine
+                .decompress(&decrypted, block.size_plain as usize)?
         } else {
             decrypted
         };
+        if plain.len() != block.size_plain as usize {
+            return Err(CryoErrors::DecompressionError);
+        }
         Ok(plain)
     }
     pub(crate) fn verify(&mut self, p: &Path) -> Result<(), CryoErrors> {
         let blocks: Vec<BlockEntry> = self.index.block.clone();
+        let mut engine = DecompressingEngine::new(&self.header.compression)?;
+
+        let max_stored = self.header.block_size.saturating_add(STORED_BLOCK_OVERHEAD);
         for (i, block) in blocks.iter().enumerate() {
+            if block.size_stored as u64 > max_stored {
+                return Err(CryoErrors::BlockTooLarge {
+                    size: block.size_stored as u64,
+                    limit: max_stored,
+                });
+            }
             self.reader
                 .seek(SeekFrom::Start(block.offset))
                 .map_err(|e| CryoErrors::ReadFailed {
@@ -296,7 +307,9 @@ impl ArchiveReader {
                 decrypt_block(EncryptedData::Block, &self.cipher, &self.header, &stored, i)?;
 
             let plain = if block.is_compressed {
-                crate::codec::decompress_block(decrypted, &self.header, self.limits.max_block_size)?
+                engine
+                    .engine
+                    .decompress(&decrypted, block.size_plain as usize)?
             } else {
                 decrypted
             };

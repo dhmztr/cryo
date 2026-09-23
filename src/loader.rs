@@ -1,5 +1,6 @@
-use crate::codec::{Cipher, decompress_block, decrypt_block};
+use crate::codec::{Cipher, decrypt_block};
 use crate::consts::{Limits, MAX_BLOCK_SIZE, MAX_HEADER_SIZE, MAX_INDEX_SIZE, MAX_M_COST};
+use crate::engine::DecompressingEngine;
 use crate::errors::CryoErrors;
 use crate::format::{EncryptedData, Footer, Header, Index};
 use std::io::{BufReader, Read, Seek, SeekFrom};
@@ -46,11 +47,13 @@ impl FileStructs {
         let header = rmp_serde::from_slice::<Header>(&header_bytes)
             .map_err(|_| CryoErrors::DeserializationFailed)?;
         event!(Level::DEBUG, "Header: {:#?}", header);
+        verify_version_support(&header)?;
         let eff_max_block = if limits.max_block_size == 0 {
             MAX_BLOCK_SIZE
         } else {
             limits.max_block_size
         };
+
         if header.block_size > eff_max_block {
             return Err(CryoErrors::BlockTooLarge {
                 size: header.block_size,
@@ -69,12 +72,12 @@ impl FileStructs {
             });
         }
         reader
-            .seek(SeekFrom::End(-17))
+            .seek(SeekFrom::End(-29))
             .map_err(|e| CryoErrors::ReadFailed {
                 p: p.to_path_buf(),
                 source: e,
             })?;
-        let mut footer_bytes: [u8; 17] = [0u8; 17];
+        let mut footer_bytes: [u8; 29] = [0u8; 29];
         reader
             .read_exact(&mut footer_bytes)
             .map_err(|e| CryoErrors::ReadFailed {
@@ -90,6 +93,12 @@ impl FileStructs {
         if footer.index_size_stored as u64 > eff_max_index {
             return Err(CryoErrors::IndexTooLarge {
                 size: footer.index_size_stored as u64,
+                limit: eff_max_index,
+            });
+        }
+        if footer.index_size_plain as u64 > eff_max_index {
+            return Err(CryoErrors::IndexTooLarge {
+                size: footer.index_size_plain as u64,
                 limit: eff_max_index,
             });
         }
@@ -111,13 +120,22 @@ impl FileStructs {
             })?;
 
         let mut index_bytes = if !matches!(cipher, Cipher::None) {
-            decrypt_block(EncryptedData::Index, &cipher, &header, &index_bytes, 0)?
+            decrypt_block(
+                EncryptedData::Index(footer.index_nonce),
+                &cipher,
+                &header,
+                &index_bytes,
+                0,
+            )?
         } else {
             index_bytes
         };
 
         if footer.index_compressed {
-            index_bytes = decompress_block(index_bytes, &header, limits.max_block_size)?;
+            let mut engine = DecompressingEngine::new(&header.compression)?;
+            index_bytes = engine
+                .engine
+                .decompress(&index_bytes, footer.index_size_plain as usize)?;
         }
         let index = rmp_serde::from_slice::<Index>(&index_bytes)
             .map_err(|_| CryoErrors::DeserializationFailed)?;
@@ -128,5 +146,13 @@ impl FileStructs {
             cipher,
             footer,
         })
+    }
+}
+
+pub fn verify_version_support(h: &Header) -> Result<(), CryoErrors> {
+    if h.version != crate::consts::VERSION {
+        Err(CryoErrors::NotSupported)
+    } else {
+        Ok(())
     }
 }

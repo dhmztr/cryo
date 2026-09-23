@@ -1,4 +1,5 @@
 use crate::consts::{MAGIC, VERSION};
+use crate::engine::Compressor;
 use crate::errors::CryoErrors;
 use argon2::password_hash::rand_core::OsRng;
 use clap::ValueEnum;
@@ -9,7 +10,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 pub enum EncryptedData {
-    Index,
+    Index([u8; 12]),
     Block,
 }
 
@@ -72,7 +73,8 @@ impl Index {
 pub struct Header {
     pub magic: [u8; 8],
     pub version: u16,
-    pub compression: i32,
+    pub compression: Compressor,
+    pub compression_level: i32,
     pub encryption: EncryptionType,
     pub argon_salt: [u8; 32],
     pub argon_params: (u32, u32, u32),
@@ -86,6 +88,7 @@ pub(crate) struct Footer {
     pub(crate) index_size_stored: u32,
     pub(crate) index_size_plain: u32,
     pub(crate) index_compressed: bool,
+    pub(crate) index_nonce: [u8; 12],
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Serialize, Deserialize)]
@@ -123,7 +126,8 @@ impl ParamsProfile {
 impl Header {
     pub fn new(
         profile: ParamsProfile,
-        compression: i32,
+        compression: Compressor,
+        compression_level: i32,
         bs: u64,
         encryption: EncryptionType,
     ) -> Self {
@@ -137,6 +141,7 @@ impl Header {
             version: VERSION,
             encryption,
             compression,
+            compression_level,
             argon_salt: salt,
             argon_params: profile.params(),
             archive_id,
@@ -147,19 +152,16 @@ impl Header {
 }
 
 impl Footer {
-    pub fn serialize(&self) -> [u8; 17] {
-        let mut out = [0u8; 17];
+    pub fn serialize(&self) -> [u8; 29] {
+        let mut out = [0u8; 29];
         out[0..8].copy_from_slice(&self.index_offset.to_le_bytes());
         out[8..12].copy_from_slice(&self.index_size_stored.to_le_bytes());
         out[12..16].copy_from_slice(&self.index_size_plain.to_le_bytes());
         out[16] = self.index_compressed as u8;
+        out[17..29].copy_from_slice(self.index_nonce.as_slice());
         out
     }
-    pub fn deserialize(raw_data: [u8; 17]) -> Result<Self, CryoErrors> {
-        if raw_data.len() != 17 {
-            return Err(CryoErrors::DeserializationFailed);
-        }
-
+    pub fn deserialize(raw_data: [u8; 29]) -> Result<Self, CryoErrors> {
         let raw_index_offset: [u8; 8] = raw_data[0..8]
             .try_into()
             .map_err(|_| CryoErrors::DeserializationFailed)?;
@@ -169,16 +171,22 @@ impl Footer {
         let raw_size_plain: [u8; 4] = raw_data[12..16]
             .try_into()
             .map_err(|_| CryoErrors::DeserializationFailed)?;
+
         let raw_compressed: u8 = raw_data[16];
+        let index_nonce: [u8; 12] = raw_data[17..29]
+            .try_into()
+            .map_err(|_| CryoErrors::DeserializationFailed)?;
         let index_offset = u64::from_le_bytes(raw_index_offset);
         let index_size_stored = u32::from_le_bytes(raw_size_stored);
         let index_size_plain = u32::from_le_bytes(raw_size_plain);
         let index_compressed = raw_compressed != 0;
+
         Ok(Self {
             index_offset,
             index_size_stored,
             index_size_plain,
             index_compressed,
+            index_nonce,
         })
     }
 }
@@ -226,6 +234,7 @@ mod tests {
             index_size_stored: 678,
             index_size_plain: 999,
             index_compressed: true,
+            index_nonce: [0u8; 12],
         };
         let bytes = f.serialize();
         let back = Footer::deserialize(bytes).unwrap();
@@ -233,6 +242,7 @@ mod tests {
         assert_eq!(f.index_size_stored, back.index_size_stored);
         assert_eq!(f.index_size_plain, back.index_size_plain);
         assert_eq!(f.index_compressed, back.index_compressed);
+        assert_eq!(f.index_nonce, back.index_nonce);
     }
 
     #[test]
@@ -242,6 +252,7 @@ mod tests {
             index_size_stored: 100,
             index_size_plain: 100,
             index_compressed: false,
+            index_nonce: [0u8; 12],
         };
         let back = Footer::deserialize(f.serialize()).unwrap();
         assert!(!back.index_compressed);

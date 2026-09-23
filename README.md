@@ -134,7 +134,11 @@ These exist to protect against malformed or malicious archives that claim enormo
 
 ## Benchmarks
 
-`scripts/bench.sh` generates a ~970 MiB compressible corpus and times `cryo compress` (default level, 512 KiB blocks) against `tar | gzip` and `tar | zstd` at their default settings. Run it yourself with `./scripts/bench.sh` (needs `tar`, `gzip`, `zstd` on `PATH`).
+`scripts/bench.sh` generates a ~970 MiB compressible corpus, then benchmarks **every compression algorithm cryo supports against the same algorithm under `tar`** — `zstd`, `gzip`, `xz` and `none`, each at a matched compression level. For every pair it reports compress time, decompress time, archive size, ratio and throughput, plus an `ok`/`BAD` column verifying the extracted tree is byte-complete, so a corrupt result can never be mistaken for a fast one.
+
+Run it with `./scripts/bench.sh` (needs `tar`, plus whichever of `gzip`, `zstd`, `xz` you want compared — a missing tool just marks that `tar` row `skip`). Tunable via env: `ALGOS`, `CORPUS_MB`, `FILES`, `BS`, `CRYO_BIN`, `ZSTD_LEVEL`, `GZIP_LEVEL`, `XZ_LEVEL`. `xz` over the full corpus takes minutes, so `ALGOS="zstd gzip" CORPUS_MB=100 ./scripts/bench.sh` is the quick loop.
+
+Reading the numbers: cryo compresses fixed-size blocks across many threads, while `tar | gzip` pushes one stream through one core — much of the wall-clock gap is that, not the codec. The same block chunking is why cryo's ratio trails single-stream `tar` on highly repetitive data, most visibly with `xz`.
 
 Measured on a 16-core machine, average of 3 runs:
 

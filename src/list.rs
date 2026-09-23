@@ -6,8 +6,9 @@ use bytesize::ByteSize;
 
 use crate::cli::{ListArgs, OutputFormat};
 use crate::consts::Limits;
+use crate::engine::Compressor;
 use crate::errors::CryoErrors;
-use crate::format::{EncryptionType, FileType};
+use crate::format::{EncryptionType, FileType, Header};
 use crate::loader::FileStructs;
 
 pub fn list_files(args: ListArgs) -> Result<(), CryoErrors> {
@@ -45,8 +46,8 @@ fn print_human(structs: &FileStructs, archive_path: &str) {
     println!("  \x1b[2mversion:\x1b[0m     {}", structs.header.version);
     println!("  \x1b[2mencryption:\x1b[0m  {}", encryption_str);
     println!(
-        "  \x1b[2mcompression:\x1b[0m zstd (level {})",
-        structs.header.compression
+        "  \x1b[2mcompression:\x1b[0m {}",
+        compression_label(&structs.header)
     );
     println!(
         "  \x1b[2mblock size:\x1b[0m  {}",
@@ -78,9 +79,9 @@ fn print_human(structs: &FileStructs, archive_path: &str) {
         let (size_str, ratio_str) = match entry.ftype {
             FileType::File => {
                 let compr = structs.index.file_compressed_size(entry);
-                let ratio = match (compr * 100).checked_div(entry.size) {
+                let ratio = match compr.saturating_mul(100).checked_div(entry.size) {
                     Some(r) => format!("{r:>4}%"),
-                    None => "  --".to_string(),
+                    None => "   --".to_string(),
                 };
                 (format!("{:>10}", ByteSize(entry.size)), ratio)
             }
@@ -89,7 +90,8 @@ fn print_human(structs: &FileStructs, archive_path: &str) {
         let ts = format_timestamp(entry.timestamp);
         let path_str = match &entry.symlink_target {
             Some(target) => format!(
-                "{} \x1b[2m->\x1b[0m {} {}",
+                "{}{}\x1b[0m \x1b[2m->\x1b[0m {}{}\x1b[0m",
+                color,
                 entry.path.display(),
                 color,
                 target.display()
@@ -108,7 +110,7 @@ fn print_human(structs: &FileStructs, archive_path: &str) {
     }
 
     let total_compressed = structs.index.total_compressed_size();
-    let archive_ratio = match (total_compressed * 100).checked_div(total_size) {
+    let archive_ratio = match total_compressed.saturating_mul(100).checked_div(total_size) {
         Some(r) => format!("{r}%"),
         None => "--".to_string(),
     };
@@ -127,11 +129,12 @@ fn print_plain(structs: &FileStructs, archive_path: &str) {
     let total_compressed = structs.index.total_compressed_size();
 
     println!(
-        "# archive={}\tversion={}\tencryption={}\tcompression={}\tblock_size={}\ttotal_uncompressed={}\ttotal_compressed={}",
+        "# archive={}\tversion={}\tencryption={}\tcompression={}\tcompression_level={}\tblock_size={}\ttotal_uncompressed={}\ttotal_compressed={}",
         archive_path,
         structs.header.version,
         encryption_label(&structs.header.encryption),
-        structs.header.compression,
+        algo_name(&structs.header.compression),
+        structs.header.compression_level,
         structs.header.block_size,
         structs.index.total_stream_size,
         total_compressed,
@@ -189,7 +192,14 @@ fn print_json(structs: &FileStructs, archive_path: &str) {
         "  \"encryption\": {},",
         js(encryption_label(&structs.header.encryption))
     );
-    println!("  \"compression\": {},", structs.header.compression);
+    println!(
+        "  \"compression\": {},",
+        js(algo_name(&structs.header.compression))
+    );
+    println!(
+        "  \"compression_level\": {},",
+        structs.header.compression_level
+    );
     println!("  \"block_size\": {},", structs.header.block_size);
     println!(
         "  \"total_uncompressed\": {},",
@@ -232,6 +242,26 @@ fn print_json(structs: &FileStructs, archive_path: &str) {
 
     println!("  ]");
     println!("}}");
+}
+
+/// Returns the algorithm name as accepted by the `--compression` flag.
+fn algo_name(compression: &Compressor) -> &'static str {
+    match compression {
+        Compressor::Zstd => "zstd",
+        Compressor::Xz => "xz",
+        Compressor::Gzip => "gzip",
+        Compressor::None => "none",
+    }
+}
+
+/// Formats the archive compression as `<algorithm> (level <n>)`, omitting the
+/// level for archives stored without compression.
+fn compression_label(header: &Header) -> String {
+    let algo = algo_name(&header.compression);
+    match header.compression {
+        Compressor::None => algo.to_string(),
+        _ => format!("{algo} (level {})", header.compression_level),
+    }
 }
 
 fn encryption_label(enc: &EncryptionType) -> &'static str {
@@ -385,6 +415,35 @@ mod tests {
     fn days_to_ymd_march_after_leap() {
         let (y, m, d) = days_to_ymd(11017);
         assert_eq!((y, m, d), (2000, 3, 1));
+    }
+
+    fn make_header(compression: Compressor, level: i32) -> Header {
+        Header::new(
+            crate::format::ParamsProfile::Fast,
+            compression,
+            level,
+            512 * 1024,
+            EncryptionType::None,
+        )
+    }
+
+    #[test]
+    fn compression_label_includes_level() {
+        assert_eq!(
+            compression_label(&make_header(Compressor::Gzip, 6)),
+            "gzip (level 6)"
+        );
+    }
+
+    #[test]
+    fn compression_label_omits_level_when_stored() {
+        assert_eq!(compression_label(&make_header(Compressor::None, 3)), "none");
+    }
+
+    #[test]
+    fn algo_name_matches_cli_values() {
+        assert_eq!(algo_name(&Compressor::Zstd), "zstd");
+        assert_eq!(algo_name(&Compressor::Xz), "xz");
     }
 
     #[test]

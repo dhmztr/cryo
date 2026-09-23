@@ -1,3 +1,4 @@
+use crate::engine::Compressor;
 use crate::format::{EncryptionType, ParamsProfile};
 use clap::Args;
 use clap::Parser;
@@ -29,9 +30,11 @@ pub(crate) struct CompressArgs {
     pub(crate) path_to_compress: PathBuf,
     #[arg(short, long, default_value_t = false)]
     pub(crate) recursive: bool,
-    #[arg(short, long, default_value_t = 3, value_parser = clap::value_parser!(i32).range(-7..=22))]
+    #[arg(short, long, default_value = "zstd")]
+    pub(crate) compression: Compressor,
+    #[arg( long="cl", default_value_t = 3, value_parser = clap::value_parser!(i32))]
     pub(crate) compression_level: i32,
-    #[arg(short, long,value_enum,default_value_t = EncryptionType::None)]
+    #[arg(short, long="et",value_enum,default_value_t = EncryptionType::None)]
     pub(crate) encryption_type: EncryptionType,
     #[arg(long="ep",value_enum,default_value_t= ParamsProfile::Balanced)]
     pub(crate) encryption_params: ParamsProfile,

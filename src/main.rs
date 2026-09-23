@@ -14,6 +14,7 @@ mod codec;
 mod compress;
 mod consts;
 mod decompress;
+mod engine;
 mod errors;
 mod filter;
 mod format;
