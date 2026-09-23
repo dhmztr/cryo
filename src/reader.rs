@@ -132,7 +132,9 @@ impl ArchiveReader {
                 .canonicalize()
                 .map_err(|_| CryoErrors::InvalidPath)?;
             let link_dir = out_dir.parent().unwrap_or(&self.root);
-            let canonical_link_dir = link_dir.canonicalize().map_err(|_| CryoErrors::InvalidPath)?;
+            let canonical_link_dir = link_dir
+                .canonicalize()
+                .map_err(|_| CryoErrors::InvalidPath)?;
             let resolved = normalize(&canonical_link_dir.join(target));
             if !resolved.starts_with(&canonical_root) {
                 return Err(CryoErrors::UnsafePath(target.clone()));
