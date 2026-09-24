@@ -24,8 +24,14 @@ pub struct ArchiveReader {
 }
 
 impl ArchiveReader {
-    pub(crate) fn new(f: File, p: &Path, out: PathBuf, limits: Limits) -> Result<Self, CryoErrors> {
-        let structs = FileStructs::retrieve(&f, p, &limits)?;
+    pub(crate) fn new(
+        f: File,
+        p: &Path,
+        out: PathBuf,
+        limits: Limits,
+        confirm: bool,
+    ) -> Result<Self, CryoErrors> {
+        let structs = FileStructs::retrieve(&f, p, &limits, confirm)?;
         let reader = BufReader::new(f);
 
         Ok(ArchiveReader {
@@ -52,6 +58,8 @@ impl ArchiveReader {
         .unwrap()
         .progress_chars("=>-");
         fs::create_dir_all(&self.root).map_err(|_| CryoErrors::WriteError)?;
+
+        let blocks = build_block_ranges(self.index.block.as_slice());
 
         for f in &files {
             let name = f
@@ -85,7 +93,6 @@ impl ArchiveReader {
                 None
             };
             let out_dir = safe_output_path(&self.root, f.path.as_path())?;
-            let blocks = build_block_ranges(self.index.block.as_slice());
             self.extract_file(f, out_dir.as_path(), &blocks, pb_file.as_ref())?;
 
             if let Some(pb) = pb_file {
@@ -105,11 +112,7 @@ impl ArchiveReader {
         blocks: &[(u64, u64)],
         pb: Option<&ProgressBar>,
     ) -> Result<(), CryoErrors> {
-        let eff_max_file = if self.limits.max_file_size == 0 {
-            MAX_FILE_SIZE
-        } else {
-            self.limits.max_file_size
-        };
+        let eff_max_file = self.limits.max_file_size.unwrap_or(MAX_FILE_SIZE);
         if f.size > eff_max_file {
             return Err(CryoErrors::FileTooLarge {
                 size: f.size,
@@ -117,7 +120,9 @@ impl ArchiveReader {
             });
         }
         let file_start = f.stream_offset;
-        let file_end = file_start + f.size;
+        let file_end = file_start
+            .checked_add(f.size)
+            .ok_or(CryoErrors::DeserializationFailed)?;
         if let Some(parent) = out_dir.parent() {
             fs::create_dir_all(parent).map_err(|_| CryoErrors::WriteError)?;
         }
@@ -191,7 +196,7 @@ impl ArchiveReader {
                 bytes = take_end - take_start,
                 "reading block slice"
             );
-            let plain = self.read_block(&block, i, &mut engine)?;
+            let plain = self.read_block(&block, i as u64, &mut engine)?;
             let calc_checksum = blake3::hash(&plain);
             if *calc_checksum.as_bytes() != block.checksum {
                 return Err(CryoErrors::DecompressionError);
@@ -225,7 +230,7 @@ impl ArchiveReader {
     pub(crate) fn read_block(
         &mut self,
         block: &BlockEntry,
-        block_num: usize,
+        block_num: u64,
         engine: &mut DecompressingEngine,
     ) -> Result<Vec<u8>, CryoErrors> {
         if block.size_plain as u64 > self.header.block_size {
@@ -256,7 +261,7 @@ impl ArchiveReader {
             })?;
         let decrypted = if !matches!(self.cipher, Cipher::None) {
             decrypt_block(
-                EncryptedData::Block,
+                EncryptedData::Block(block.nonce),
                 &self.cipher,
                 &self.header,
                 &stored,
@@ -283,6 +288,12 @@ impl ArchiveReader {
 
         let max_stored = self.header.block_size.saturating_add(STORED_BLOCK_OVERHEAD);
         for (i, block) in blocks.iter().enumerate() {
+            if block.size_plain as u64 > self.header.block_size {
+                return Err(CryoErrors::BlockTooLarge {
+                    size: block.size_plain as u64,
+                    limit: self.header.block_size,
+                });
+            }
             if block.size_stored as u64 > max_stored {
                 return Err(CryoErrors::BlockTooLarge {
                     size: block.size_stored as u64,
@@ -303,8 +314,13 @@ impl ArchiveReader {
                     source: e,
                 })?;
 
-            let decrypted =
-                decrypt_block(EncryptedData::Block, &self.cipher, &self.header, &stored, i)?;
+            let decrypted = decrypt_block(
+                EncryptedData::Block(block.nonce),
+                &self.cipher,
+                &self.header,
+                &stored,
+                i as u64,
+            )?;
 
             let plain = if block.is_compressed {
                 engine
@@ -339,14 +355,19 @@ pub(crate) fn build_block_ranges(blocks: &[BlockEntry]) -> Vec<(u64, u64)> {
 
 #[cfg(test)]
 mod tests {
+    use rand_core::{OsRng, RngCore};
+
     use super::*;
 
     fn make_block(size_plain: u32, size_stored: u32) -> BlockEntry {
+        let mut nonce = [0u8; 12];
+        OsRng.fill_bytes(&mut nonce);
         BlockEntry {
             offset: 0,
             size_stored,
             size_plain,
             is_compressed: false,
+            nonce,
             checksum: [0u8; 32],
         }
     }

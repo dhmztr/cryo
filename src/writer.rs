@@ -1,7 +1,7 @@
-use crate::codec::{Cipher, block_nonce};
+use crate::codec::Cipher;
 use crate::engine::CompressingEngine;
 use crate::errors::CryoErrors;
-use crate::format::{BlockEntry, EncryptedData, FileEntry, Footer, Header, Index};
+use crate::format::{EncryptedData, FileEntry, Footer, Header, Index};
 use aes_gcm::aead::Aead;
 use aes_gcm::aead::Payload;
 use aes_gcm::{Aes256Gcm, KeyInit};
@@ -19,6 +19,7 @@ pub struct ProcessedBlock {
     pub processed_data: Vec<u8>,
     pub size_plain: u32,
     pub is_compressed: bool,
+    pub nonce: [u8; 12],
     pub checksum: [u8; 32],
 }
 pub enum WriterMessage {
@@ -33,23 +34,26 @@ pub struct ArchiveWriter {
     pub index: Index,
     pub stream_position: u64,
     pub file_position: u64,
-    pub pending: Vec<u8>,
     pub(crate) cipher: Cipher,
     pub(crate) header: Header,
 }
 
-impl ArchiveWriter {
-    pub fn new(arname: &str, h: Header) -> Result<ArchiveWriter, CryoErrors> {
-        let archivename = if arname.ends_with("cryo") {
-            arname.to_owned()
-        } else {
-            arname.to_owned() + ".cryo"
-        };
+pub fn archive_filename(arname: &str) -> String {
+    if arname.ends_with("cryo") {
+        arname.to_owned()
+    } else {
+        arname.to_owned() + ".cryo"
+    }
+}
 
+impl ArchiveWriter {
+    pub fn new(arname: &str, h: Header, confirm: bool) -> Result<ArchiveWriter, CryoErrors> {
+        let archivename = archive_filename(arname);
+
+        let cipher = Cipher::new(&h, confirm)?;
         let file = OpenOptions::new()
             .write(true)
             .read(true)
-            .truncate(true)
             .create_new(true)
             .open(archivename)
             .map_err(|_| CryoErrors::InvalidPath)?;
@@ -59,7 +63,6 @@ impl ArchiveWriter {
             block: vec![],
             total_stream_size: 0u64,
         };
-        let cipher = Cipher::new(&h)?;
         let header_bytes = rmp_serde::to_vec(&h).map_err(|_| CryoErrors::SerializationFailed)?;
         let header_bytes_len = header_bytes.len() as u32;
         let bytes_to_write = [
@@ -77,7 +80,6 @@ impl ArchiveWriter {
             index,
             stream_position: 0,
             file_position: bytes_to_write.len() as u64,
-            pending: vec![],
             cipher,
 
             header: h,
@@ -85,10 +87,6 @@ impl ArchiveWriter {
     }
 
     pub(crate) fn finish(&mut self) -> Result<(), CryoErrors> {
-        if !self.pending.is_empty() {
-            let last_block = std::mem::take(&mut self.pending);
-            self.flush_block(&last_block)?;
-        }
         self.index.total_stream_size = self.stream_position;
         let index_bytes =
             rmp_serde::to_vec(&self.index).map_err(|_| CryoErrors::SerializationFailed)?;
@@ -129,38 +127,10 @@ impl ArchiveWriter {
         Ok(())
     }
 
-    fn flush_block(&mut self, raw_block: &[u8]) -> Result<(), CryoErrors> {
-        let size_plain = raw_block.len() as u32;
-        let mut engine =
-            CompressingEngine::new(&self.header.compression, self.header.compression_level)?;
-        let block_compressed = engine.engine.compress(raw_block)?;
-        let (payload, is_compressed): (&[u8], bool) = if block_compressed.len() < raw_block.len() {
-            (&block_compressed, true)
-        } else {
-            (raw_block, false)
-        };
-        let enc_block = self.encrypt_block(payload, EncryptedData::Block)?;
-        let size_stored = enc_block.len() as u32;
-
-        self.writer
-            .write_all(&enc_block)
-            .map_err(|_| CryoErrors::WriteError)?;
-        self.index.block.push(BlockEntry {
-            offset: self.file_position,
-            size_plain,
-            size_stored,
-            is_compressed,
-            checksum: blake3::hash(raw_block).into(),
-        });
-        self.file_position += enc_block.len() as u64;
-
-        Ok(())
-    }
     fn encrypt_block(&self, payload: &[u8], encd: EncryptedData) -> Result<Vec<u8>, CryoErrors> {
         let (nonce, aad) = match encd {
-            EncryptedData::Block => {
+            EncryptedData::Block(nonce) => {
                 let block_num = self.index.block.len() as u64;
-                let nonce = block_nonce(&self.header.nonce_base, block_num);
                 let mut aad = [0u8; 24];
                 aad[..8].copy_from_slice(&block_num.to_le_bytes());
                 aad[8..].copy_from_slice(&self.header.archive_id);

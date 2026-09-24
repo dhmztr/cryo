@@ -10,7 +10,7 @@ use xz2::write::XzEncoder;
 pub enum Compressor {
     Zstd,
     Xz,
-    Gzip,
+    Deflate,
     None,
 }
 impl std::fmt::Display for Compressor {
@@ -18,14 +18,27 @@ impl std::fmt::Display for Compressor {
         match self {
             Compressor::Zstd => write!(f, "Zstd"),
             Compressor::None => write!(f, "None"),
-            Compressor::Gzip => write!(f, "Gzip"),
+            Compressor::Deflate => write!(f, "Deflate"),
             Compressor::Xz => write!(f, "Xz"),
+        }
+    }
+}
+impl Compressor {
+    fn give_range(&self) -> (i32, i32) {
+        match self {
+            Self::Zstd => {
+                let r = zstd::compression_level_range();
+                (*r.start(), *r.end())
+            }
+            Self::Deflate => (0, 9),
+            Self::None => (0, 0),
+            Self::Xz => (0, 9),
         }
     }
 }
 
 pub struct CompressingEngine {
-    pub engine: Box<dyn Compress>,
+    pub engine: Box<dyn Compress + Send>,
 }
 
 pub trait Compress {
@@ -42,11 +55,11 @@ impl Compress for ZstdCompress {
             .map_err(|_| CryoErrors::CompressionError)
     }
 }
-struct GzipCompress {
+struct DeflateCompress {
     level: u32,
 }
 
-impl Compress for GzipCompress {
+impl Compress for DeflateCompress {
     fn compress(&mut self, data: &[u8]) -> Result<Vec<u8>, CryoErrors> {
         let mut compressor = DeflateEncoder::new(vec![], Compression::new(self.level));
         compressor
@@ -81,18 +94,23 @@ impl CompressingEngine {
     pub fn new(engine: &Compressor, level: i32) -> Result<Self, CryoErrors> {
         let verify_level = |engine: &Compressor, level: i32| -> bool {
             match engine {
-                Compressor::Gzip | Compressor::Xz => (0..=9).contains(&level),
+                Compressor::Deflate | Compressor::Xz => (0..=9).contains(&level),
                 Compressor::Zstd => zstd::compression_level_range().contains(&level),
                 Compressor::None => true,
             }
         };
         if !verify_level(engine, level) {
-            return Err(CryoErrors::InvalidCompressionLevel);
+            let (min, max) = engine.give_range();
+            return Err(CryoErrors::InvalidCompressionLevel {
+                algo: engine.to_string(),
+                min,
+                max,
+            });
         }
         match engine {
             Compressor::Zstd => {
                 let engine = zstd::bulk::Compressor::new(level).map_err(|_| {
-                    CryoErrors::InitializationError("Failed to initialzie zstd engine".into())
+                    CryoErrors::InitializationError("Failed to initialize zstd engine".into())
                 })?;
                 Ok(Self {
                     engine: Box::new(ZstdCompress { inner: engine }),
@@ -104,10 +122,10 @@ impl CompressingEngine {
                     engine: Box::new(XzCompress { level }),
                 })
             }
-            Compressor::Gzip => {
+            Compressor::Deflate => {
                 let level = level as u32;
                 Ok(Self {
-                    engine: Box::new(GzipCompress { level }),
+                    engine: Box::new(DeflateCompress { level }),
                 })
             }
             Compressor::None => Ok(Self {
@@ -149,8 +167,8 @@ impl Decompress for XzDecompress {
         Ok(out)
     }
 }
-struct GzipDecompress;
-impl Decompress for GzipDecompress {
+struct DeflateDecompress;
+impl Decompress for DeflateDecompress {
     fn decompress(&mut self, data: &[u8], max_size: usize) -> Result<Vec<u8>, CryoErrors> {
         let decompressor = DeflateDecoder::new(data);
         let mut limit = decompressor.take(max_size as u64 + 1);
@@ -183,8 +201,8 @@ impl DecompressingEngine {
                     engine: Box::new(ZstdDecompress { inner }),
                 })
             }
-            Compressor::Gzip => Ok(Self {
-                engine: Box::new(GzipDecompress),
+            Compressor::Deflate => Ok(Self {
+                engine: Box::new(DeflateDecompress),
             }),
             Compressor::None => Ok(Self {
                 engine: Box::new(NoneDecompress),
@@ -234,7 +252,7 @@ mod tests {
     #[test]
     fn gzip_roundtrip() {
         let data = compressible_data();
-        roundtrip(&Compressor::Gzip, 6, &data);
+        roundtrip(&Compressor::Deflate, 6, &data);
     }
 
     #[test]
@@ -252,7 +270,7 @@ mod tests {
     #[test]
     fn empty_input_roundtrip() {
         roundtrip(&Compressor::Zstd, 3, b"");
-        roundtrip(&Compressor::Gzip, 6, b"");
+        roundtrip(&Compressor::Deflate, 6, b"");
         roundtrip(&Compressor::Xz, 6, b"");
         roundtrip(&Compressor::None, 0, b"");
     }
@@ -261,14 +279,14 @@ mod tests {
     fn incompressible_roundtrip() {
         let data = incompressible_data();
         roundtrip(&Compressor::Zstd, 3, &data);
-        roundtrip(&Compressor::Gzip, 6, &data);
+        roundtrip(&Compressor::Deflate, 6, &data);
         roundtrip(&Compressor::Xz, 6, &data);
     }
 
     #[test]
     fn gzip_level_9_valid() {
         assert!(
-            CompressingEngine::new(&Compressor::Gzip, 9).is_ok(),
+            CompressingEngine::new(&Compressor::Deflate, 9).is_ok(),
             "level 9 must be valid"
         );
     }
@@ -284,11 +302,11 @@ mod tests {
     #[test]
     fn level_out_of_range_rejected() {
         assert!(
-            CompressingEngine::new(&Compressor::Gzip, 10).is_err(),
+            CompressingEngine::new(&Compressor::Deflate, 10).is_err(),
             "level 10 invalid for gzip"
         );
         assert!(
-            CompressingEngine::new(&Compressor::Gzip, -1).is_err(),
+            CompressingEngine::new(&Compressor::Deflate, -1).is_err(),
             "negative invalid"
         );
         assert!(
@@ -312,10 +330,10 @@ mod tests {
     #[test]
     fn zip_bomb_rejected_gzip() {
         let big = vec![0u8; 1_000_000];
-        let mut comp = CompressingEngine::new(&Compressor::Gzip, 9).unwrap();
+        let mut comp = CompressingEngine::new(&Compressor::Deflate, 9).unwrap();
         let compressed = comp.engine.compress(&big).unwrap();
 
-        let mut decomp = DecompressingEngine::new(&Compressor::Gzip).unwrap();
+        let mut decomp = DecompressingEngine::new(&Compressor::Deflate).unwrap();
         let result = decomp.engine.decompress(&compressed, 1000);
         assert!(
             result.is_err(),
@@ -354,10 +372,10 @@ mod tests {
     #[test]
     fn decompress_at_exact_limit_ok() {
         let data = vec![7u8; 5000];
-        let mut comp = CompressingEngine::new(&Compressor::Gzip, 6).unwrap();
+        let mut comp = CompressingEngine::new(&Compressor::Deflate, 6).unwrap();
         let compressed = comp.engine.compress(&data).unwrap();
 
-        let mut decomp = DecompressingEngine::new(&Compressor::Gzip).unwrap();
+        let mut decomp = DecompressingEngine::new(&Compressor::Deflate).unwrap();
         let out = decomp
             .engine
             .decompress(&compressed, 5000)
@@ -368,7 +386,7 @@ mod tests {
     #[test]
     fn compression_reduces_size() {
         let data = compressible_data();
-        for algo in &[Compressor::Zstd, Compressor::Gzip, Compressor::Xz] {
+        for algo in &[Compressor::Zstd, Compressor::Deflate, Compressor::Xz] {
             let level = 6.min(match algo {
                 Compressor::Zstd => 19,
                 _ => 9,

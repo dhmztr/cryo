@@ -20,7 +20,7 @@ pub fn list_files(args: ListArgs) -> Result<(), CryoErrors> {
         source: e,
     })?;
     let limits = Limits::default();
-    let structs = FileStructs::retrieve(&f, &archive_path, &limits)?;
+    let structs = FileStructs::retrieve(&f, &archive_path, &limits, args.confirm)?;
     let path_str = archive_path.display().to_string();
 
     match args.format {
@@ -150,7 +150,7 @@ fn print_plain(structs: &FileStructs, archive_path: &str) {
         let (size, compressed, ratio) = match entry.ftype {
             FileType::File => {
                 let c = structs.index.file_compressed_size(entry);
-                let r = (c * 100).checked_div(entry.size).unwrap_or(0);
+                let r = c.saturating_mul(100).checked_div(entry.size).unwrap_or(0);
                 (entry.size, c, r)
             }
             _ => (0, 0, 0),
@@ -219,7 +219,7 @@ fn print_json(structs: &FileStructs, archive_path: &str) {
         let (size, compressed, ratio) = match entry.ftype {
             FileType::File => {
                 let c = structs.index.file_compressed_size(entry);
-                let r = (c * 100).checked_div(entry.size).unwrap_or(0);
+                let r = c.saturating_mul(100).checked_div(entry.size).unwrap_or(0);
                 (entry.size, c, r)
             }
             _ => (0, 0, 0),
@@ -249,7 +249,7 @@ fn algo_name(compression: &Compressor) -> &'static str {
     match compression {
         Compressor::Zstd => "zstd",
         Compressor::Xz => "xz",
-        Compressor::Gzip => "gzip",
+        Compressor::Deflate => "deflate",
         Compressor::None => "none",
     }
 }
@@ -430,8 +430,8 @@ mod tests {
     #[test]
     fn compression_label_includes_level() {
         assert_eq!(
-            compression_label(&make_header(Compressor::Gzip, 6)),
-            "gzip (level 6)"
+            compression_label(&make_header(Compressor::Deflate, 6)),
+            "deflate (level 6)"
         );
     }
 

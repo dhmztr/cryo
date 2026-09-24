@@ -6,7 +6,7 @@ pub enum CryoErrors {
     EmptyArchiveName,
     CompressionError,
     DecompressionError,
-    InvalidCompressionLevel,
+    InvalidCompressionLevel { algo: String, min: i32, max: i32 },
     InvalidPath,
     SerializationFailed,
     DeserializationFailed,
@@ -25,18 +25,18 @@ pub enum CryoErrors {
     ChecksumMismatch,
     InvalidPattern,
     ThreadError,
-    BackupRemovalFailed(PathBuf),
     NotSupported,
+    InvalidMagic,
+    DirNotRecursive,
 }
 
 impl Display for CryoErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::EmptyArchiveName => write!(f, "Archive name cannot be empty"),
-            Self::InvalidCompressionLevel => write!(
-                f,
-                "Compression level must be 0 (lowest, fastest) to 22 (highest, slowest)"
-            ),
+            Self::InvalidCompressionLevel { algo, min, max } => {
+                write!(f, "{} level must be {}..={}", algo, min, max)
+            }
             Self::InvalidPath => write!(
                 f,
                 "Invalid path: path doesn't exist, or --recursive was used on a file (requires a directory)"
@@ -89,22 +89,22 @@ impl Display for CryoErrors {
                 bytesize::ByteSize(*size),
                 bytesize::ByteSize(*limit)
             ),
-            Self::ChecksumMismatch => write!(f, "Error checksum mismatched while veryfing!"),
+            Self::ChecksumMismatch => write!(f, "Error checksum mismatched while verifying!"),
             Self::InvalidPattern => write!(f, "You have provided invalid pattern for the files!"),
             Self::ThreadError => write!(
                 f,
                 "While using multithreading to process archive error has happened!"
-            ),
-            Self::BackupRemovalFailed(p) => write!(
-                f,
-                "Succesfuly appended the file, yet failed to remove backup from {}",
-                p.display()
             ),
             Self::PossibleZipBomb => write!(
                 f,
                 "When trying to decompress archive encountered possible zip bomb!"
             ),
             Self::NotSupported => write!(f, "Archive version not supported"),
+            Self::InvalidMagic => write!(
+                f,
+                "Archive you are trying to read does not have the right MAGIC"
+            ),
+            Self::DirNotRecursive => write!(f, "path you tried to compress is a dir use -r"),
         }
     }
 }

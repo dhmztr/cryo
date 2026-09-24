@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 pub enum EncryptedData {
     Index([u8; 12]),
-    Block,
+    Block([u8; 12]),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -20,6 +20,7 @@ pub(crate) struct BlockEntry {
     pub(crate) size_stored: u32,
     pub(crate) size_plain: u32,
     pub(crate) is_compressed: bool,
+    pub(crate) nonce: [u8; 12],
     pub(crate) checksum: [u8; 32],
 }
 
@@ -51,7 +52,7 @@ impl Index {
             return 0;
         }
         let file_start = f.stream_offset;
-        let file_end = file_start + f.size;
+        let file_end = file_start.saturating_add(f.size);
         let mut stream_pos = 0u64;
         let mut compressed = 0.0f64;
         for block in &self.block {
@@ -59,6 +60,9 @@ impl Index {
             let block_end = block_start + block.size_plain as u64;
             stream_pos = block_end;
             if block_end <= file_start || block_start >= file_end {
+                continue;
+            }
+            if block.size_plain == 0 {
                 continue;
             }
             let overlap = file_end.min(block_end) - file_start.max(block_start);
@@ -80,7 +84,6 @@ pub struct Header {
     pub argon_params: (u32, u32, u32),
     pub archive_id: [u8; 16],
     pub block_size: u64,
-    pub nonce_base: [u8; 12],
 }
 
 pub(crate) struct Footer {
@@ -134,8 +137,6 @@ impl Header {
         let mut salt: [u8; 32] = [0u8; 32];
         OsRng.fill_bytes(&mut salt);
         let archive_id = Uuid::new_v4().into_bytes();
-        let mut nonce_base: [u8; 12] = [0; 12];
-        OsRng.fill_bytes(&mut nonce_base);
         Header {
             magic: MAGIC,
             version: VERSION,
@@ -146,7 +147,6 @@ impl Header {
             argon_params: profile.params(),
             archive_id,
             block_size: bs,
-            nonce_base,
         }
     }
 }
@@ -206,11 +206,14 @@ mod tests {
     use super::*;
 
     fn make_block(size_plain: u32, size_stored: u32) -> BlockEntry {
+        let mut nonce = [0u8; 12];
+        OsRng.fill_bytes(&mut nonce);
         BlockEntry {
             offset: 0,
             size_stored,
             size_plain,
             is_compressed: false,
+            nonce,
             checksum: [0u8; 32],
         }
     }

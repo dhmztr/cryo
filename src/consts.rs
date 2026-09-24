@@ -14,21 +14,21 @@ pub const MAX_HEADER_SIZE: usize = 64 * 1024;
 pub const STORED_BLOCK_OVERHEAD: u64 = 1024;
 
 pub struct Limits {
-    pub(crate) max_block_size: u64,
-    pub(crate) max_file_size: u64,
-    pub(crate) max_m_cost: u32,
-    pub(crate) max_index_size: u64,
-    pub(crate) max_header_size: usize,
+    pub(crate) max_block_size: Option<u64>,
+    pub(crate) max_file_size: Option<u64>,
+    pub(crate) max_m_cost: Option<u32>,
+    pub(crate) max_index_size: Option<u64>,
+    pub(crate) max_header_size: Option<usize>,
 }
 
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            max_file_size: MAX_FILE_SIZE,
-            max_block_size: MAX_BLOCK_SIZE,
-            max_m_cost: MAX_M_COST,
-            max_index_size: MAX_INDEX_SIZE,
-            max_header_size: MAX_HEADER_SIZE,
+            max_file_size: Some(MAX_FILE_SIZE),
+            max_block_size: Some(MAX_BLOCK_SIZE),
+            max_m_cost: Some(MAX_M_COST),
+            max_index_size: Some(MAX_INDEX_SIZE),
+            max_header_size: Some(MAX_HEADER_SIZE),
         }
     }
 }

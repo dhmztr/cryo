@@ -14,9 +14,9 @@ pub(crate) fn verify_archive(args: VerifyArgs) -> Result<(), CryoErrors> {
     })?;
     let out = PathBuf::from_str("./")
         .map_err(|_| CryoErrors::InitializationError("Failed to fetch current dir".to_string()))?;
-    let mut arch = ArchiveReader::new(file, &args.archive, out, Limits::default())?;
+    let mut arch = ArchiveReader::new(file, &args.archive, out, Limits::default(), false)?;
     arch.verify(&args.archive)?;
-    println!("Succesfuly verified the archive!");
+    println!("Successfully verified the archive!");
 
     Ok(())
 }
