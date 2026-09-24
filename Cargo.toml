@@ -1,6 +1,6 @@
 [package]
 name = "cryoarc"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2024"
 description = "Block-based archive tool with parallel zstd, xz or DEFLATE compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption"
 license = "Apache-2.0"
