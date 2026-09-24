@@ -3,9 +3,10 @@ use crate::codec::{Cipher, encrypt_block};
 use crate::engine::{CompressingEngine, Compressor};
 use crate::errors::CryoErrors;
 use crate::format::{BlockEntry, EncryptedData, FileEntry, FileType, Header};
-use crate::writer::{ArchiveWriter, RawBlock};
+use crate::writer::{ArchiveWriter, RawBlock, archive_filename};
 use crate::writer::{ProcessedBlock, WriterMessage};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use rand_core::{OsRng, RngCore};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::collections::BTreeMap;
 use std::fs::Metadata;
@@ -47,13 +48,19 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
     );
 
     check_compression_for_arg_err(&arv_name, path.as_path(), recursive)?;
+    CompressingEngine::new(&compression, com_level)?;
 
     let mut files_to_compress: Vec<PathBuf> = vec![];
-    if recursive {
+    let root = if recursive {
         retrieve_all_files(&path, &mut files_to_compress)?;
+        path
     } else {
-        files_to_compress.push(path.to_path_buf());
-    }
+        if path.is_dir() {
+            return Err(CryoErrors::DirNotRecursive);
+        }
+        files_to_compress.push(path.clone());
+        path.parent().unwrap_or(Path::new(".")).to_path_buf()
+    };
 
     event!(
         Level::DEBUG,
@@ -86,26 +93,31 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
     .progress_chars("=>-");
 
     let h = Header::new(eparams, compression, com_level, bs, enc_type);
-    let mut archive = ArchiveWriter::new(&arv_name, h.clone())?;
+    let archive_path = PathBuf::from(archive_filename(&arv_name));
+    let mut archive = ArchiveWriter::new(&arv_name, h.clone(), args.confirm)?;
     let mut files = Vec::new();
     let mut stream_position = 0u64;
     let mut block_id = 0u64;
     let mut pending_buffer = Vec::new();
     let block_size = args.bs as usize;
     let workers_tx = reader_writer_tx.clone();
+    let worker_cipher = archive.cipher.clone();
+    let worker_archive_id = archive.header.archive_id;
+    let worker_compression = archive.header.compression;
+    let worker_level = archive.header.compression_level;
     let workers_handle = thread::spawn(move || {
         spawn_workers(
             raw_rx,
             workers_tx,
-            archive.cipher,
-            archive.header.nonce_base,
-            archive.header.archive_id,
-            &archive.header.compression,
-            archive.header.compression_level,
+            &worker_cipher,
+            worker_archive_id,
+            &worker_compression,
+            worker_level,
         )
     });
     let writer_handle = thread::spawn(move || writer(reader_writer_rx, &mut archive));
 
+    let mut read_result: Result<(), CryoErrors> = Ok(());
     for file in &files_to_compress {
         let name = file
             .file_name()
@@ -131,9 +143,9 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
             None
         };
 
-        read_file_to_bytes(
+        read_result = read_file_to_bytes(
             file.as_path(),
-            &path,
+            &root,
             &mut files,
             &mut stream_position,
             &mut block_id,
@@ -141,7 +153,10 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
             block_size,
             &raw_tx,
             pb_bytes.as_ref(),
-        )?;
+        );
+        if read_result.is_err() {
+            break;
+        }
 
         if let Some(pb) = pb_bytes {
             pb.finish_and_clear();
@@ -150,28 +165,37 @@ pub(crate) fn initialize_compression(args: CompressArgs) -> Result<(), CryoError
             pb.inc(1);
         }
     }
-    if !pending_buffer.is_empty() {
+    if read_result.is_ok() && !pending_buffer.is_empty() {
         let _ = raw_tx.send(RawBlock {
             id: block_id,
             raw_data: std::mem::take(&mut pending_buffer),
         });
     }
     drop(raw_tx);
-    workers_handle
-        .join()
-        .map_err(|_| CryoErrors::ThreadError)??;
-    let _ = reader_writer_tx.send(WriterMessage::Finalize {
-        files,
-        total_stream_size: stream_position,
-    });
-    writer_handle
-        .join()
-        .map_err(|_| CryoErrors::ThreadError)??;
+    let finish = (|| -> Result<(), CryoErrors> {
+        workers_handle
+            .join()
+            .map_err(|_| CryoErrors::ThreadError)??;
+        read_result?;
+        reader_writer_tx
+            .send(WriterMessage::Finalize {
+                files,
+                total_stream_size: stream_position,
+            })
+            .map_err(|_| CryoErrors::ThreadError)?;
+        writer_handle
+            .join()
+            .map_err(|_| CryoErrors::ThreadError)??;
+        Ok(())
+    })();
+    if finish.is_err() {
+        let _ = fs::remove_file(&archive_path);
+    }
+    finish?;
 
     event!(Level::DEBUG, archive = %arv_name, "compression finished");
     Ok(())
 }
-
 #[allow(clippy::too_many_arguments)]
 pub fn read_file_to_bytes(
     p: &Path,
@@ -365,6 +389,7 @@ pub fn writer(rx: Receiver<WriterMessage>, arch: &mut ArchiveWriter) -> Result<(
                         size_stored,
                         size_plain: block.size_plain,
                         is_compressed: block.is_compressed,
+                        nonce: block.nonce,
                         checksum: block.checksum,
                     });
                     expected_id += 1;
@@ -388,25 +413,31 @@ pub fn writer(rx: Receiver<WriterMessage>, arch: &mut ArchiveWriter) -> Result<(
 pub fn spawn_workers(
     raw_rx: Receiver<RawBlock>,
     writer_tx: Sender<WriterMessage>,
-    cipher: Cipher,
-    nonce_base: [u8; 12],
+    cipher: &Cipher,
     archive_id: [u8; 16],
     compression: &Compressor,
     level: i32,
 ) -> Result<(), CryoErrors> {
     let writer_tx = Mutex::new(writer_tx);
+    let engine_pool: Mutex<Vec<CompressingEngine>> = Mutex::new(vec![]);
     raw_rx
         .into_iter()
         .par_bridge()
         .try_for_each(|raw_block| -> Result<(), CryoErrors> {
-            let processed = process_block(
-                raw_block,
-                cipher,
-                &nonce_base,
-                &archive_id,
-                compression,
-                level,
-            )?;
+            let mut single_engine = match engine_pool
+                .lock()
+                .map_err(|_| CryoErrors::ThreadError)?
+                .pop()
+            {
+                Some(eng) => eng,
+                None => CompressingEngine::new(compression, level)?,
+            };
+            let result = process_block(raw_block, cipher, &archive_id, &mut single_engine);
+            engine_pool
+                .lock()
+                .map_err(|_| CryoErrors::ThreadError)?
+                .push(single_engine);
+            let processed = result?;
             writer_tx
                 .lock()
                 .map_err(|_| CryoErrors::ThreadError)?
@@ -418,27 +449,25 @@ pub fn spawn_workers(
 
 fn process_block(
     block: RawBlock,
-    cipher: Cipher,
-    nonce_base: &[u8; 12],
+    cipher: &Cipher,
     archive_id: &[u8; 16],
-    compression: &Compressor,
-    level: i32,
+    compressor: &mut CompressingEngine,
 ) -> Result<ProcessedBlock, CryoErrors> {
     let checksum = blake3::hash(&block.raw_data);
-    let mut compressor = CompressingEngine::new(compression, level)?;
 
     let size_plain = block.raw_data.len() as u32;
     let compressed = compressor.engine.compress(block.raw_data.as_slice())?;
-    let (to_encrypt, is_compressed) = if compressed.len() as u32 > size_plain {
-        (block.raw_data, false)
-    } else {
+    let (to_encrypt, is_compressed) = if compressed.len() < block.raw_data.len() {
         (compressed, true)
+    } else {
+        (block.raw_data, false)
     };
+    let mut nonce = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce);
     let encrypted = encrypt_block(
         block.id,
-        nonce_base,
         &to_encrypt,
-        EncryptedData::Block,
+        EncryptedData::Block(nonce),
         archive_id,
         cipher,
     )?;
@@ -447,6 +476,7 @@ fn process_block(
         processed_data: encrypted,
         size_plain,
         is_compressed,
+        nonce,
         checksum: checksum.into(),
     })
 }

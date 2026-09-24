@@ -2,7 +2,7 @@
 name = "cryoarc"
 version = "0.3.0"
 edition = "2024"
-description = "Block-based archive tool with zstd compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption"
+description = "Block-based archive tool with parallel zstd, xz or DEFLATE compression and optional AES-256-GCM or ChaCha20-Poly1305 encryption"
 license = "Apache-2.0"
 repository = "https://github.com/dhmztr/cryo"
 keywords = ["archive", "compression", "encryption", "zstd"]
@@ -34,6 +34,7 @@ globset = "0.4.19"
 rayon = "1.12.0"
 flate2 = "1.1.10"
 xz2 = "0.1.7"
+zeroize = { version = "1.8.2", features = ["zeroize_derive"] }
 
 # The profile that 'dist' will build with
 [profile.dist]

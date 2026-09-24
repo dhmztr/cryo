@@ -22,20 +22,19 @@ pub(crate) fn initialize_decompression(args: DecompressArgs) -> Result<(), CryoE
     let max_header_size: Option<usize> = args.max_header_size.map(|max_h| max_h as usize);
     let filter = build_matcher(&args.filter)?;
     check_decompression_for_arg_err(&arv_name, &output_dir)?;
-    let defaults = Limits::default();
     let limits = Limits {
-        max_file_size: args.max_file_size.unwrap_or(defaults.max_file_size),
-        max_block_size: args.max_block_size.unwrap_or(defaults.max_block_size),
-        max_m_cost: max_m_cost.unwrap_or(defaults.max_m_cost),
-        max_index_size: args.max_index_size.unwrap_or(defaults.max_index_size),
-        max_header_size: max_header_size.unwrap_or(defaults.max_header_size),
+        max_file_size: args.max_file_size,
+        max_block_size: args.max_block_size,
+        max_m_cost,
+        max_index_size: args.max_index_size,
+        max_header_size,
     };
 
     let file = File::open(&arv_name).map_err(|e| CryoErrors::ReadFailed {
         p: arv_name.clone(),
         source: e,
     })?;
-    let mut arch = ArchiveReader::new(file, &arv_name, output_dir, limits)?;
+    let mut arch = ArchiveReader::new(file, &arv_name, output_dir, limits, args.confirm)?;
     arch.index.files = arch
         .index
         .files

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const ALGOS: [&str; 4] = ["zstd", "gzip", "xz", "none"];
+const ALGOS: [&str; 4] = ["zstd", "deflate", "xz", "none"];
 
 fn cryo_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cryo"))
@@ -103,8 +103,8 @@ fn zstd_archive_round_trips() {
 }
 
 #[test]
-fn gzip_archive_round_trips() {
-    compress_verify_decompress("gzip", &[]);
+fn deflate_archive_round_trips() {
+    compress_verify_decompress("deflate", &[]);
 }
 
 #[test]
@@ -209,11 +209,11 @@ fn out_of_range_level_fails_cleanly() {
         src.to_str().unwrap(),
         "-r",
         "-c",
-        "gzip",
+        "deflate",
         "--cl",
         "42",
     ]);
-    assert!(!out.status.success(), "level 42 must fail for gzip");
+    assert!(!out.status.success(), "level 42 must fail for deflate");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         !err.contains("panicked"),

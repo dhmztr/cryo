@@ -42,6 +42,8 @@ pub(crate) struct CompressArgs {
     pub(crate) bs: u64,
     #[arg(long = "debug", short = 'v', default_value_t = false)]
     pub(crate) debug: bool,
+    #[arg(long = "confirm", default_value_t = true)]
+    pub(crate) confirm: bool,
 }
 
 #[derive(Args)]
@@ -62,13 +64,17 @@ pub(crate) struct DecompressArgs {
     #[arg(long,value_parser = parse_size)]
     pub(crate) max_header_size: Option<u64>,
     pub(crate) filter: Vec<String>,
+    #[arg(long = "confirm", default_value_t = true)]
+    pub(crate) confirm: bool,
 }
 #[derive(Args)]
 pub(crate) struct AppendArgs {
-    #[arg(short, long = "archive")]
+    #[arg(short = 'f', long = "archive")]
     pub(crate) archive_path: PathBuf,
-    #[arg(short, long = "append")]
+    #[arg(short = 'a', long = "append")]
     pub(crate) file_to_append: PathBuf,
+    #[arg(long = "confirm", default_value_t = true)]
+    pub(crate) confirm: bool,
 }
 
 #[derive(Args)]
@@ -76,6 +82,8 @@ pub(crate) struct ListArgs {
     pub(crate) archive: PathBuf,
     #[arg(long, value_enum, default_value_t = OutputFormat::Auto)]
     pub(crate) format: OutputFormat,
+    #[arg(long = "confirm", default_value_t = true)]
+    pub(crate) confirm: bool,
 }
 
 #[derive(Args)]

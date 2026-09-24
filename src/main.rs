@@ -28,8 +28,11 @@ mod writer;
 fn main() {
     let cli = Cli::parse();
     let debug = cli.debug
-        || matches!(&cli.command, cli::Command::Compress(a) if a.debug)
-        || matches!(&cli.command, cli::Command::Decompress(a) if a.debug);
+        || match &cli.command {
+            cli::Command::Compress(a) => a.debug,
+            cli::Command::Decompress(a) => a.debug,
+            cli::Command::List(_) | cli::Command::Verify(_) | cli::Command::Append(_) => false,
+        };
     if debug {
         tracing_subscriber::fmt()
             .with_max_level(Level::DEBUG)

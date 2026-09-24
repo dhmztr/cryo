@@ -1,5 +1,5 @@
 use crate::codec::{Cipher, decrypt_block};
-use crate::consts::{Limits, MAX_BLOCK_SIZE, MAX_HEADER_SIZE, MAX_INDEX_SIZE, MAX_M_COST};
+use crate::consts::{Limits, MAGIC, MAX_BLOCK_SIZE, MAX_HEADER_SIZE, MAX_INDEX_SIZE, MAX_M_COST};
 use crate::engine::DecompressingEngine;
 use crate::errors::CryoErrors;
 use crate::format::{EncryptedData, Footer, Header, Index};
@@ -15,7 +15,12 @@ pub(crate) struct FileStructs {
 }
 
 impl FileStructs {
-    pub(crate) fn retrieve(f: &File, p: &Path, limits: &Limits) -> Result<Self, CryoErrors> {
+    pub(crate) fn retrieve(
+        f: &File,
+        p: &Path,
+        limits: &Limits,
+        confirm: bool,
+    ) -> Result<Self, CryoErrors> {
         let mut header_size_bytes: [u8; 4] = [0u8; 4];
         let mut reader = BufReader::new(f);
         reader
@@ -25,11 +30,7 @@ impl FileStructs {
                 source: e,
             })?;
         let header_size = u32::from_le_bytes(header_size_bytes) as usize;
-        let eff_max_header = if limits.max_header_size == 0 {
-            MAX_HEADER_SIZE
-        } else {
-            limits.max_header_size
-        };
+        let eff_max_header = limits.max_header_size.unwrap_or(MAX_HEADER_SIZE);
         if header_size > eff_max_header {
             return Err(CryoErrors::HeaderTooLarge {
                 size: header_size as u64,
@@ -47,12 +48,8 @@ impl FileStructs {
         let header = rmp_serde::from_slice::<Header>(&header_bytes)
             .map_err(|_| CryoErrors::DeserializationFailed)?;
         event!(Level::DEBUG, "Header: {:#?}", header);
-        verify_version_support(&header)?;
-        let eff_max_block = if limits.max_block_size == 0 {
-            MAX_BLOCK_SIZE
-        } else {
-            limits.max_block_size
-        };
+        verify_metadata(&header)?;
+        let eff_max_block = limits.max_block_size.unwrap_or(MAX_BLOCK_SIZE);
 
         if header.block_size > eff_max_block {
             return Err(CryoErrors::BlockTooLarge {
@@ -60,11 +57,7 @@ impl FileStructs {
                 limit: eff_max_block,
             });
         }
-        let eff_max_m = if limits.max_m_cost == 0 {
-            MAX_M_COST
-        } else {
-            limits.max_m_cost
-        };
+        let eff_max_m = limits.max_m_cost.unwrap_or(MAX_M_COST);
         if header.argon_params.0 > eff_max_m {
             return Err(CryoErrors::MCostTooLarge {
                 size: header.argon_params.0 as u64 * 1024,
@@ -85,11 +78,7 @@ impl FileStructs {
                 source: e,
             })?;
         let footer = Footer::deserialize(footer_bytes)?;
-        let eff_max_index = if limits.max_index_size == 0 {
-            MAX_INDEX_SIZE
-        } else {
-            limits.max_index_size
-        };
+        let eff_max_index = limits.max_index_size.unwrap_or(MAX_INDEX_SIZE);
         if footer.index_size_stored as u64 > eff_max_index {
             return Err(CryoErrors::IndexTooLarge {
                 size: footer.index_size_stored as u64,
@@ -102,7 +91,7 @@ impl FileStructs {
                 limit: eff_max_index,
             });
         }
-        let cipher = Cipher::new(&header)?;
+        let cipher = Cipher::new(&header, confirm)?;
         let mut index_bytes = vec![0u8; footer.index_size_stored as usize];
         event!(Level::DEBUG, "Index size: {}", index_bytes.len());
         reader
@@ -149,10 +138,12 @@ impl FileStructs {
     }
 }
 
-pub fn verify_version_support(h: &Header) -> Result<(), CryoErrors> {
+pub fn verify_metadata(h: &Header) -> Result<(), CryoErrors> {
     if h.version != crate::consts::VERSION {
-        Err(CryoErrors::NotSupported)
-    } else {
-        Ok(())
+        return Err(CryoErrors::NotSupported);
     }
+    if h.magic != MAGIC {
+        return Err(CryoErrors::InvalidMagic);
+    }
+    Ok(())
 }
