@@ -17,6 +17,8 @@ Block-based archive tool with a choice of zstd, xz or DEFLATE compression and op
 cargo install cryoarc
 ```
 
+Unix only — Linux and macOS. cryo stores POSIX permission bits and recreates symlinks, so it does not build on Windows.
+
 ## Build from source
 
 ```sh
