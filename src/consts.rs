@@ -3,7 +3,7 @@ use argon2::{Algorithm, Version};
 /// Archive signature: the ASCII tag `CRYO` followed by DOS EOF, LF, CR and NUL,
 /// so that text-mode transfers corrupt the file visibly instead of silently.
 pub const MAGIC: [u8; 8] = [0x43, 0x52, 0x59, 0x4F, 0x1A, 0x0A, 0x0D, 0x00];
-pub const VERSION: u16 = 2;
+pub const VERSION: u16 = 3;
 pub const ARGON2VERSION: Version = Version::V0x13;
 pub const ARGON2ALGO: Algorithm = argon2::Algorithm::Argon2id;
 pub const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
